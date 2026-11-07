@@ -323,6 +323,13 @@ class Solver:
                 last_err = "The task is solvable with the given data."
                 continue
             code = extract_code(reply)
+            if code and re.fullmatch(r"(?:\s*#[^\n]*\n)*\s*(?:print\(\s*)?[\"']?(IMPOSSIBLE|NOT[ _]FOUND)[\"']?\s*\)?\s*(?:#[^\n]*)?\s*",
+                                     code, re.I) and (data or MATH_HINT):
+                # A bare refusal inside a code block is a refusal, not a program to run.
+                if not self.careful:
+                    return Outcome("infeasible", note="model: impossible (in code block)")
+                last_err = "The task is solvable with the given data."
+                continue
             if not code:
                 direct = parse_answer_line(reply)
                 # A bare value is accepted only after we asked for a program once: models
