@@ -12,3 +12,4 @@ bench/sets/
 bench/runs/
 bench/proxy_probe.jsonl
 logs/
+bench/*.jsonl
