@@ -36,11 +36,13 @@ LADDERS = {
     "search": ["qwen3.8-27b-noreason", "qwen3.6-35b-a3b-noreason", "qwen3.8-27b"],
     "coding": ["qwen3.8-27b-noreason", "qwen3.6-35b-a3b-noreason", "qwen3.8-27b"],
 }
-# Prior success probability by kind, and the cost model: cost = a + b * context_chars (organisers'
-# units), least-squares fit over 270 solved bench tasks on the real proxy (bench/trajectories).
+# Prior success probability by kind, and the cost model (organisers' units):
+#   median forecast = max(floor, a + b * context_chars), upper bound = forecast * p90
+# fitted by least absolute deviations over 664 bench tasks on the real proxy, all six sets
+# (bench/tools/fit_cost.py; retries, second opinions and escalations included).
 PRIOR_P = {"math": 0.95, "data": 0.97, "search": 0.97, "coding": 0.97}
-COST_FIT = {"math": (70.4, 0.0932, 40), "data": (30.0, 0.06, 30), "search": (13.4, 0.0341, 15),
-            "coding": (-11.7, 0.1007, 60)}
+COST_FIT = {"math": (67.5, 0.1191, 40.1, 1.78), "data": (13.8, 0.1086, 30.5, 1.95),
+            "search": (18.1, 0.0285, 19.2, 3.15), "coding": (-34.4, 0.1178, 49.5, 1.94)}
 REASONING_MAX_TOKENS = 1500
 
 
@@ -153,7 +155,7 @@ class Run:
     def estimate(self, task, info):
         """(p_success, expected cost) before any call; logged next to the actual spend."""
         kind = info.get("kind", "math")
-        a, b, floor = COST_FIT.get(kind, (60.0, 0.1, 40))
+        a, b, floor, _p90 = COST_FIT.get(kind, (60.0, 0.1, 40, 2.0))
         cost = max(floor, a + b * info.get("ctx_chars", 0))
         p = PRIOR_P.get(kind, 0.6)
         if info.get("problems"):
@@ -267,7 +269,9 @@ class Run:
             p, c = self.estimate(t, info)
             info["p"], info["cost"] = p, c
             self.estimates[t.name] = {"task_id": t.id, "kind": t.kind, "estimate": round(c, 1),
-                                      "p_success": round(p, 3), "ctx_chars": info.get("ctx_chars", 0)}
+                                      "estimate_p90": round(c * COST_FIT.get(t.kind, (0, 0, 0, 2.0))[3], 1),
+                                      "p_success": round(p, 3), "ctx_chars": info.get("ctx_chars", 0),
+                                      "prose": t.kind == "search" and not info.get("kb_cards", True)}
             if info.get("problems") and t.kind != "coding" and not self.careful:
                 self.finish_task(t, self.precheck_outcome(t, info))
                 continue

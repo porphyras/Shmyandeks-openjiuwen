@@ -187,8 +187,21 @@ prompt/completion tokens, cost, latency) — `bench/trajectories/calls_*.csv`, a
 `bench/tools/collect_traj.py`. Before any call the harness also writes its forecast for every
 task (`estimate`, `p_success`, `ctx_chars`) and, after each task, the actual spend, to
 `token_estimates.json` next to the solutions file in `$OUT` (and to the trace). The forecast
-is a per-kind linear model `cost = a + b × context characters` fitted by least squares on
-these trajectories.
+is a per-kind linear model `cost = max(floor, a + b × context characters)` fitted by least
+absolute deviations (the median forecast, which minimises the mean absolute error) on 664
+tasks of these trajectories, retries, second opinions and escalations included; an upper
+bound `estimate_p90 = forecast × q90(actual/forecast)` is written next to it. In-sample
+quality per kind (organisers' units):
+
+| kind | tasks | mean actual | MAE | under-forecast | p90 factor |
+|---|---|---|---|---|---|
+| coding | 116 | 340 | 207 | 51 % | 1.94 |
+| data | 138 | 115 | 47 | 51 % | 1.95 |
+| math | 210 | 142 | 60 | 50 % | 1.78 |
+| search | 160 | 166 | 57 | 49 % | 3.15 |
+
+The error is dominated by the rare expensive tasks (a reasoning retry of a hard code fix, a
+second look at a large prose base); the median task is forecast within a few units.
 
 Results on the real proxy (organisers' units; feasible reward solved / available):
 
