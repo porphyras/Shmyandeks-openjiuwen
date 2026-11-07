@@ -87,6 +87,10 @@ def env_float(name, default=None):
         return default
 
 
+class SkipTask(Exception):
+    pass
+
+
 class Run:
     def __init__(self, args, api_key):
         from harness.llm import LLM
@@ -126,6 +130,11 @@ class Run:
         reasoning = not model.endswith("noreason")
         if reasoning:
             max_tokens = max(max_tokens, REASONING_MAX_TOKENS)
+        rem = self.llm.remaining()
+        if rem is not None:
+            est = sum(len(str(m.get("content", ""))) for m in messages) / 33.0 + min(max_tokens, 300) * 0.4
+            if est > rem:
+                raise SkipTask()  # a known budget would be overrun by this call: leave this task
         text, cost, finish = self.llm.chat(model, messages, max_tokens, temperature=temperature,
                                            timeout=150.0 if reasoning else 60.0, tag=task.name)
         with self.lock:
@@ -281,7 +290,7 @@ class Run:
                 if info.get("problems") and t.kind != "coding" and not self.careful:
                     self.finish_task(t, self.precheck_outcome(t, info))
                     return
-            need = info["cost"] * (2.5 if self.careful else 1.0)
+            need = info["cost"]
             with self.lock:
                 rem = self.llm.remaining()
                 if rem is not None and rem - self.reserved < need:
@@ -293,6 +302,9 @@ class Run:
                 out = self.solver.solve(t, info, level)
             except BudgetExhausted:
                 raise
+            except SkipTask:
+                trace({"ev": "skip_budget_call", "task": t.name})
+                return
             except Exception as e:
                 out = Outcome("error", note="%s: %s" % (type(e).__name__, str(e)[:200]))
             finally:
