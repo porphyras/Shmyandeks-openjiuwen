@@ -108,7 +108,9 @@ tokens the budget is counted in.
    without `LLM_*` variables, timeout, output cap, memory limit); code fixes are merged into
    the file by function name and the tests are re-run (test files are hash-checked and never
    edited; a method sent without its class goes back to the class that defines it, and when a
-   base class and its overrides all define it, each placement is tried against the tests); knowledge-base answers must occur verbatim in the base (and take its spelling),
+   base class and its overrides all define it, each placement is tried against the tests;
+   files a test run creates are removed after it, so every run - and the checker's run of the
+   hidden tests on the final workspace - starts from the original file set); knowledge-base answers must occur verbatim in the base (and take its spelling),
    except numbers computed for counting/difference questions.
 4. **Second opinion for risky computations.** A computation answer is re-derived by the
    other no-reasoning model when the evidence says the first program may be a shortcut: it

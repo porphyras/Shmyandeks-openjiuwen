@@ -219,7 +219,46 @@ class Solver:
             _write(p, v.get(p, current[p]))
         return v, ok, out
 
+    @staticmethod
+    def _ws_entries(cwd, cap=20000):
+        """Files (and directories, with a trailing slash) under the workspace; None if huge."""
+        out = set()
+        for root, dirs, files in os.walk(cwd):
+            out.update(os.path.join(root, d) + os.sep for d in dirs)
+            out.update(os.path.join(root, f) for f in files)
+            if len(out) > cap:
+                return None
+        return out
+
+    def _remove_test_leftovers(self, task):
+        """Files the test runs created (a report the test writes, then asserts did not exist
+        beforehand) are removed after every run, so each run - and the checker's run of the
+        hidden tests on the final workspace - starts from the original file set. Files that
+        were there before the first run are never touched."""
+        snap = getattr(task, "_ws_snapshot", None)
+        now = self._ws_entries(task.cwd) if snap is not None else None
+        if now is None:
+            return
+        for p in sorted(now - snap, key=len, reverse=True):  # deeper paths (files) first
+            if os.path.basename(p.rstrip(os.sep)) == "answer.txt":
+                continue
+            try:
+                if p.endswith(os.sep):
+                    os.rmdir(p)  # only when empty
+                else:
+                    os.remove(p)  # a symlink itself, never its target
+            except OSError:
+                pass
+
     def _run_tests(self, task, tests, budget_s=45.0):
+        if not hasattr(task, "_ws_snapshot"):
+            task._ws_snapshot = self._ws_entries(task.cwd)  # before the first run of the tests
+        try:
+            return self._run_tests_once(task, tests, budget_s)
+        finally:
+            self._remove_test_leftovers(task)
+
+    def _run_tests_once(self, task, tests, budget_s):
         outs, ok = [], True
         t_end = time.time() + budget_s
         for tp in tests[:5]:
