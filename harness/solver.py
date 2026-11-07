@@ -173,7 +173,7 @@ class Solver:
         return info
 
     # ------------------------------------------------------------------ coding
-    def _place_ambiguous_methods(self, task, tests, files, target, elsewhere, current, merged, code):
+    def _place_ambiguous_methods(self, task, info, tests, files, target, elsewhere, current, merged, code):
         """A method sent without its class that a base class and its overrides all define
         ("def adjust(self, cents): ..."): try it in each of those classes and keep the placement
         the tests like best. Returns (merged, ok, test_out) or None when nothing was ambiguous."""
@@ -197,16 +197,23 @@ class Solver:
         for v in variants:
             if time.time() > t_end and best:
                 break
-            for p in files:
-                if not _write(p, v.get(p, current[p])):
-                    return None
-            ok, out = self._run_tests(task, tests)
+            if not all(_write(p, v.get(p, current[p])) for p in files):
+                for p in files:
+                    _write(p, current[p])  # disk and memory must agree for the caller
+                return None
+            ok, out = self._run_tests(task, tests, budget_s=min(45.0, max(10.0, t_end - time.time())))
+            if self._tests_tampered(info):
+                break  # a test that rewrites itself: stop comparing (the tests are restored)
             names = ctx.failing_test_names(out)
             score = (ok, -(len(names) if names or ok else 999))  # a crash (no test ran) is worst
             if best is None or score > best[0]:
                 best = (score, v, ok, out)
             if ok:
                 break
+        if best is None:
+            for p in files:
+                _write(p, current[p])
+            return None
         _, v, ok, out = best
         for p in files:
             _write(p, v.get(p, current[p]))
@@ -546,7 +553,7 @@ class Solver:
                                     skip_new=elsewhere if p == target else ())
                 if m is not None and m != current[p]:
                     merged[p] = m
-            tried = self._place_ambiguous_methods(task, tests, files, target, elsewhere, current, merged, code)
+            tried = self._place_ambiguous_methods(task, info, tests, files, target, elsewhere, current, merged, code)
             if tried:
                 merged, ok, out = tried
             if not merged:
