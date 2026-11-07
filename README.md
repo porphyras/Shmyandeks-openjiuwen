@@ -66,9 +66,10 @@ tokens the budget is counted in.
    base made only of "# Name" + "Key: Value" cards, following the named fields (born,
    employer, headquarters, founded, mentor) with every card present. Anything else — an
    unknown sentence, a missing card, an absent value, an empty selection, a negative stock —
-   goes to the model path below, so a misparse costs tokens, never a wrong answer. On the
-   bench sets the fast path answered 226 tasks with zero errors; on sets in the examples'
-   format it covers about half of the tasks (coding always goes to the model). On small sets
+   goes to the model path below, so a misparse costs tokens, never a wrong answer. Over the
+   bench runs the fast path gave 1,224 answers on 213 distinct tasks with zero errors (it
+   never fires on the paraphrased and hard sets); on sets in the examples' format it covers
+   about half of the tasks (coding always goes to the model). On small sets
    (the qualification run) the model path still runs through openJiuwen as a confirmation.
 
 1. **Free inspection (no LLM).** For every task: the instruction is stripped of boilerplate
@@ -146,13 +147,13 @@ answer without a free check gets an independent second opinion.
   end the run on their own (failed calls cost nothing): each call is retried with backoff for
   up to three minutes, then the task waits for a later pass; only an explicit out-of-quota
   answer stops new calls. Everything solved is already on disk at any moment.
-- Economy mode: when a known budget does not cover the forecast of the whole queue, second
+- Economy mode: when a known budget is less than 1.25× the forecast of the whole queue, second
   opinions and reasoning retries are switched off so that first passes get the budget.
 - Replaying the real traces of the bench runs offline under hard budgets
   (`bench/tools/budget_sim.py`, policy vs a 0/1-knapsack oracle that knows every outcome and
   cost in advance): on sets in the examples' format the policy reaches 92–100 % of the oracle
-  from 1000 units up and the full score from 5000; on the hard sets 65–87 % of the oracle at
-  2000–20000 units. Ordering by the p90 forecast beat the median forecast under tight budgets.
+  from 1000 units up and the full score from 5000; on the hard sets 54–87 % of the oracle at
+  2000–20000 units (adv: 100 % from 5000). Ordering by the p90 forecast beat the median forecast under tight budgets.
 
 ## Infeasible tasks
 
@@ -250,8 +251,8 @@ prompt/completion tokens, cost, latency) — `bench/trajectories/calls_*.csv`, a
 task (`estimate`, `p_success`, `ctx_chars`) and, after each task, the actual spend, to
 `token_estimates.json` next to the solutions file in `$OUT` (and to the trace). The forecast
 is a per-kind linear model `cost = max(floor, a + b × context characters)` fitted by least
-absolute deviations (the median forecast, which minimises the mean absolute error) on 664
-tasks of these trajectories, retries, second opinions and escalations included; an upper
+absolute deviations (the median forecast, which minimises the mean absolute error) on the
+tasks of these trajectories (counts per kind in the table below), retries, second opinions and escalations included; an upper
 bound `estimate_p90 = forecast × q90(actual/forecast)` is written next to it. A question on a
 large prose base read as paragraphs gets 2.5× the search forecast: the fit sees only the first
 excerpt, while such a task takes one call (~280 units) or two-three looks with 12k-character
@@ -267,19 +268,20 @@ excerpts (650–1600). In-sample quality per kind (organisers' units):
 The error is dominated by the rare expensive tasks (a reasoning retry of a hard code fix, a
 second look at a large prose base); the median task is forecast within a few units.
 
-Results on the real proxy (organisers' units; feasible reward solved / available):
+Results on the real proxy (organisers' units; feasible reward solved / available; ranges over
+repeated runs of the stable versions of 07.11–08.11):
 
 | set | tasks (infeasible) | what it is | solved reward | tokens |
 |---|---|---|---|---|
 | train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~5k (fast path) |
 | var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
-| var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 86–93 % | ~25–30k |
-| adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–93 % | ~5k |
-| hard | 116 (16) | GSM-Hard/GSM8K, MBPP with bugs, MuSiQue 2–4 hops, DABench | 92–93 % | ~30–40k |
-| math2 | 68 (8) | MATH-500 level 5, GSM8K, SVAMP, ASDiv | 94–96 % | ~25k |
+| var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 141–146/152 (93–96 %) | ~25–33k |
+| adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–97/99 (91–98 %) | ~5k |
+| hard | 116 (16) | GSM-Hard/GSM8K, MBPP with bugs, MuSiQue 2–4 hops, DABench | 269–281/297 (91–95 %) | ~30–40k |
+| math2 | 68 (8) | MATH-500 level 5, GSM8K, SVAMP, ASDiv | 93–96 % | ~25k |
 
 A hold-out set of 60 tasks built by a separate reviewer from other sources was run on
-intermediate versions: 77 % → 85 % → 90 % → 98 % of feasible tasks solved (only aggregate
+intermediate versions: 77 % → 85 % → 90 % → 98 % → 96 % of feasible tasks solved (only aggregate
 scores and generic failure categories were fed back, never task texts or answers; see
 `docs/DECISIONS.md` for both hold-out sets). On sets in the
 format of the examples a run of 100 tasks takes about a minute with 5 sessions and costs
