@@ -120,6 +120,7 @@ class Run:
         # organisers); everything else takes the model path.
         self.fast = os.environ.get("HARNESS_FAST", "1") == "1"
         self.fast_answers = {}
+        self.economy = False
         self.llm = LLM(os.environ.get("LLM_BASE_URL", ""), api_key, budget=budget, log=trace)
         self.solver = Solver(self.ask)
         self.cost = {}
@@ -298,10 +299,18 @@ class Run:
             if t.name in self.fast_answers:
                 heapq.heappush(heap, (-1.0, next(seq), 0, t))
                 continue
-            heapq.heappush(heap, (-(t.reward * p / max(c, 1.0)), next(seq), 0, t))
+            # Ordered by reward per risk-aware cost (the p90 forecast): under a tight budget this
+            # beat the median forecast in the offline replay of real traces (bench/tools/budget_sim.py).
+            p90 = c * COST_FIT.get(t.kind, (0, 0, 0, 2.0))[3]
+            heapq.heappush(heap, (-(t.reward * p / max(p90, 1.0)), next(seq), 0, t))
         self.summary.record_estimates(self.estimates)
         trace({"ev": "estimates", "items": self.estimates})
-        trace({"ev": "plan", "queued": len(heap), "inspected": len(infos),
+        # Economy mode: a known budget that does not cover the forecast of the whole queue -
+        # second opinions and reasoning retries are switched off, first passes get the budget.
+        queued_est = sum(infos[x[3].name]["cost"] for x in heap if x[3].name in infos)
+        rem = self.llm.remaining()
+        self.economy = rem is not None and not self.careful and queued_est > 0.8 * rem
+        trace({"ev": "plan", "queued": len(heap), "economy": self.economy, "inspected": len(infos),
                "est_total": round(sum(infos[x[3].name]["cost"] for x in heap if x[3].name in infos), 1)})
 
         hlock = threading.Lock()
@@ -356,12 +365,13 @@ class Run:
                     self.finish_task(t, out)
                 trace({"ev": "fast_third", "task": t.name, "third": third})
                 return
-            if level == 0 and (out.status == "error" or (out.status == "failed" and t.kind in self.retry_kinds)):
+            if level == 0 and (out.status == "error" or (out.status == "failed" and t.kind in self.retry_kinds
+                                                             and not self.economy)):
                 with hlock:
                     retry.append(t)
             self.finish_task(t, out)
             from harness.solver import looks_complex
-            gated = (t.kind == "math" and self.math_xc == "gated" and looks_complex(t, out))
+            gated = (t.kind == "math" and self.math_xc == "gated" and not self.economy and looks_complex(t, out))
             if out.status == "solved" and t.kind != "coding" and (self.careful or t.kind in self.crosscheck_kinds or gated):
                 try:
                     out2 = self.solver.crosscheck(t, info, out)

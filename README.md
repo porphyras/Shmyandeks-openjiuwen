@@ -131,13 +131,20 @@ answer without a free check gets an independent second opinion.
 - Each task gets an expected cost before any call: context size (chars → tokens) / 10 plus the
   typical output length of its kind, times the expected number of attempts; and a success
   probability by kind, lowered sharply when the free inspection finds a problem.
-- Tasks are processed greedily by `reward × p(success) / expected cost` with up to 5 parallel
+- Tasks are processed greedily by `reward × p(success) / p90 cost forecast` with up to 5 parallel
   sessions. With an unknown budget this order is near-optimal because every task costs well
   under 1 % of the budget; when a budget is given, tasks that no longer fit are skipped in
   favour of cheaper ones, and the remainder is checked before every call. Proxy errors never
   end the run on their own (failed calls cost nothing): each call is retried with backoff for
   up to three minutes, then the task waits for a later pass; only an explicit out-of-quota
   answer stops new calls. Everything solved is already on disk at any moment.
+- Economy mode: when a known budget does not cover the forecast of the whole queue, second
+  opinions and reasoning retries are switched off so that first passes get the budget.
+- Replaying the real traces of the bench runs offline under hard budgets
+  (`bench/tools/budget_sim.py`, policy vs a 0/1-knapsack oracle that knows every outcome and
+  cost in advance): on sets in the examples' format the policy reaches 92–100 % of the oracle
+  from 1000 units up and the full score from 5000; on the hard sets 65–87 % of the oracle at
+  2000–20000 units. Ordering by the p90 forecast beat the median forecast under tight budgets.
 
 ## Infeasible tasks
 
