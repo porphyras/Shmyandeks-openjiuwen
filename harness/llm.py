@@ -161,8 +161,9 @@ def classify_error(e):
     t = " ".join(text).lower()
     if ("status=400" in t or "error 400" in t or "status=413" in t) and ("context" in t or "too long" in t or "length" in t):
         return "fatal"  # prompt too long for the model: a per-task problem, not the budget
-    if "insufficient_quota" in t or "budget exhausted" in t or "budget exceeded" in t or "out of budget" in t:
-        return "budget"
+    if ("insufficient_quota" in t or "budget exhausted" in t or "budget exceeded" in t or "out of budget" in t
+            or "status=402" in t or "error 402" in t or "error code: 402" in t or "payment required" in t):
+        return "budget"  # an explicit "spent" answer (402 Payment Required in any form)
     if ("status=400" in t or "error 400" in t or "status=404" in t or "error 404" in t) and "429" not in t:
         return "fatal"
     if "429" in t or "ratelimit" in t or "rate limit" in t or "rate_limit" in t or "одновремен" in t or "too many" in t:
