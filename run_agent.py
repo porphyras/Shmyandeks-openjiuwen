@@ -117,7 +117,7 @@ class Run:
         self.careful = False
 
     # ----------------------------------------------------------------- model calls
-    def ask(self, task, messages, level, max_tokens):
+    def ask(self, task, messages, level, max_tokens, temperature=0.0):
         from harness.llm import BudgetExhausted
         if STOP.is_set() or self.time_left() < 20:
             raise BudgetExhausted()
@@ -126,7 +126,7 @@ class Run:
         reasoning = not model.endswith("noreason")
         if reasoning:
             max_tokens = max(max_tokens, REASONING_MAX_TOKENS)
-        text, cost, finish = self.llm.chat(model, messages, max_tokens,
+        text, cost, finish = self.llm.chat(model, messages, max_tokens, temperature=temperature,
                                            timeout=150.0 if reasoning else 60.0, tag=task.name)
         with self.lock:
             self.cost[task.name] = self.cost.get(task.name, 0.0) + cost
@@ -146,6 +146,8 @@ class Run:
         p = PRIOR_P.get(kind, 0.6)
         if info.get("problems"):
             p *= 0.05
+        if getattr(task, "soft_hints", None):
+            p *= 0.5
         return p, cost
 
     # ----------------------------------------------------------------- run

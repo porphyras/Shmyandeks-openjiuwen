@@ -25,6 +25,21 @@ CODING_TESTSRC = os.environ.get("HARNESS_CODING_TESTSRC", "0") == "1"
 CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S)
 
 
+# Text columns that are numbers in disguise ("1,250", "$12.50", " 7 ") become numbers; the
+# model is told so. Only columns where nearly every non-empty value parses are touched.
+_CLEAN = """def _clean(d):
+    import re as _re
+    for c in d.columns:
+        if d[c].dtype == object or pd.api.types.is_string_dtype(d[c]):
+            s = d[c].astype(str).str.strip()
+            filled = s[~s.str.lower().isin(["", "nan", "na", "n/a", "none", "null", "-"])]
+            if len(filled) and filled.str.contains(r"[,$€£ ]|^\\d", regex=True).any():
+                num = pd.to_numeric(filled.str.replace(r"[$€£,\\s]", "", regex=True), errors="coerce")
+                if num.notna().mean() >= 0.8:
+                    d[c] = pd.to_numeric(s.str.replace(r"[$€£,\\s]", "", regex=True), errors="coerce")
+    return d
+"""
+
 _PRINT_SCALAR = """try:
     import pandas as _pd
     if isinstance(_r, _pd.DataFrame) and _r.size == 1:
@@ -46,7 +61,7 @@ class Outcome:
 def extract_code(text):
     m = CODE_RE.findall(text or "")
     if m:
-        return max(m, key=len).strip()
+        return max(m, key=len).strip("\n").rstrip()  # keep the first line's indentation (methods)
     t = (text or "").strip()
     if t.startswith("```"):
         t = t.strip("`")
@@ -237,8 +252,8 @@ class Solver:
         prelude = ""
         if DATA_EXPR and len(tables) == 1:
             rel = os.path.relpath(tables[0], task.cwd)
-            load = "pd.read_csv(%r%s)" % (rel, ", sep='\\t'" if ctx.table_sep(tables[0]) == "\t" else "")
-            prelude = "import pandas as pd\ndf = %s\n" % load
+            load = ctx.pandas_load(tables[0], rel)
+            prelude = "import pandas as pd\n" + _CLEAN + "df = _clean(%s)\n" % load
             body += ("\ndf = %s is loaded. Reply in a ```python block with one pandas expression "
                      "over df whose value is the answer." % load)
         elif DATA_EXPR and 2 <= len(tables) <= 6:
@@ -251,8 +266,9 @@ class Solver:
                 while var in names:
                     var += "_"
                 names.add(var)
-                loads.append("%s = pd.read_csv(%r%s)" % (var, rel, ", sep='\\t'" if ctx.table_sep(tp) == "\t" else ""))
-            prelude = "import pandas as pd\n" + "\n".join(loads) + "\n"
+                loads.append("%s = %s" % (var, ctx.pandas_load(tp, rel)))
+            prelude = "import pandas as pd\n" + _CLEAN + "\n".join(
+                "%s = _clean(%s)" % tuple(l.split(" = ", 1)) for l in loads) + "\n"
             body += ("\nLoaded with pandas: %s. Reply in a ```python block with a short pandas program using them "
                      "(no comments) that prints only the answer." % "; ".join(loads))
         else:
@@ -264,6 +280,11 @@ class Solver:
             else:
                 body += ("\nReply with a short python3 program in a ```python block that follows the task step by step "
                          "and prints only the final answer.")
+        if prelude:
+            body += (" Numeric-looking text columns (thousands separators, currency signs) are already numbers;"
+                     " blanks/NA are NaN. Apply any rounding the question asks for.")
+            if re.search(r"; columns: [^\n]*[A-Za-z] [A-Za-z]", data):
+                body += " Column names contain spaces: index them as df['Column Name'] (or backticks in query())."
         if data:
             body += " If the data cannot answer the question, reply IMPOSSIBLE."
         elif MATH_HINT:
@@ -275,7 +296,7 @@ class Solver:
             if attempt:
                 msgs = msgs[:2] + [{"role": "assistant", "content": "```python\n%s\n```" % (model_code or code)},
                                    {"role": "user", "content": last_err + " Reply with the fixed program only."}]
-            reply = self.ask(task, msgs, level + attempt, 600 if data else 400)
+            reply = self.ask(task, msgs, level + attempt, 600 if data else 400, temperature=0.5 if attempt else 0.0)
             if says_impossible(reply) and (data or MATH_HINT):
                 if not self.careful:
                     return Outcome("infeasible", note="model: impossible")
@@ -319,8 +340,9 @@ class Solver:
                 # A well-posed task never divides by zero (split into 0 parts); on data a first
                 # division by zero may be the program's own filter bug, so it gets one retry.
                 return Outcome("infeasible", note="division by zero")
+            tail = [l for l in (err or "").strip().splitlines() if l.strip()][-4:]
             last_err = ("Program timed out." if rc is None else
-                        "Program failed: " + (err.strip().splitlines() or ["(no output)"])[-1][:300])
+                        "Program failed:\n" + "\n".join(l[:200] for l in tail) if tail else "Program printed nothing.")
         return Outcome("failed", note=last_err)
 
     def _solve_search(self, task, info, level):
@@ -330,8 +352,9 @@ class Solver:
         guess = ""
         for attempt in range(3):
             if not info.get("kb_cards", True):
-                tail = "Reply with the chain of facts in a few words, then ANSWER: <value> (or NOT FOUND)."
-                mt = 160
+                tail = ("Reply with the chain of facts in a few words (names may be aliases or nicknames), "
+                        "then ANSWER: <value> (or NOT FOUND).")
+                mt = 260
             elif SEARCH_STYLE == "chain":
                 tail = "Reply with the chain of facts in a few words, then ANSWER: <value> (or NOT FOUND)."
                 mt = 90
@@ -347,10 +370,14 @@ class Solver:
             span = _kb_span(raw, excerpt)
             if span:
                 return Outcome("solved", span)
+            if raw and re.fullmatch(r"-?\d+(\.\d+)?", normalize_answer(raw)) and re.search(
+                    r"\b(how many|how much|difference|older|younger|between|sum|total|number of|count|age|years? (?:after|before|later|earlier))\b",
+                    instr, re.I):
+                return Outcome("solved", normalize_answer(raw), "computed from the base")
             guess = guess or normalize_answer(raw)
             if attempt == 0:
                 # Second look: the whole base when small, else a wider excerpt.
-                corpus_all = ctx.kb_fallback_text(task)
+                corpus_all = ctx.kb_fallback_text(task, hint=reply if not info.get("kb_cards", True) else "")
                 if len(corpus_all) > len(excerpt) + 10:
                     excerpt = corpus_all
                     continue
@@ -384,7 +411,7 @@ class Solver:
         current = dict(original)
         instr = task.short_instruction()
         out = info.get("test_out", "")
-        for attempt in range(2):
+        for attempt in range(1 if level >= 2 else 2):  # one reasoning attempt is enough
             body = (instr + "\n" + self._coding_context(task, srcs, tests, out) +
                     "\nReply in one ```python block with only the functions you changed (complete definitions). "
                     "Fix the real bug generally; do not special-case test inputs.")

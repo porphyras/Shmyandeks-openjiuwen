@@ -149,6 +149,39 @@ def table_sep(path):
     return max(("\t", ",", ";"), key=lambda c: (head.count(c), c == ","))
 
 
+def table_encoding(path):
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(256 * 1024)
+    except OSError:
+        return "utf-8"
+    try:
+        raw.decode("utf-8")
+        return "utf-8-sig"
+    except UnicodeDecodeError as e:
+        if e.start > len(raw) - 4:  # cut in the middle of a character at the end of the sample
+            return "utf-8-sig"
+        return "cp1251"
+
+
+def pandas_load(path, rel):
+    """pd.read_csv call matching the file's separator, encoding and decimal mark."""
+    sep = table_sep(path)
+    enc = table_encoding(path)
+    args = [repr(rel)]
+    if sep != ",":
+        args.append("sep=%r" % sep)
+    if enc != "utf-8-sig":
+        args.append("encoding=%r, encoding_errors='replace'" % enc)
+    else:
+        args.append("encoding='utf-8-sig'")
+    head = read_text(path, 8192)
+    if sep == ";" and re.search(r"\d,\d", head):
+        args.append("decimal=','")
+    args.append("skipinitialspace=True, on_bad_lines='skip'")
+    return "pd.read_csv(%s)" % ", ".join(args)
+
+
 def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None):
     """Header, row count, a few rows, distinct values of low-cardinality columns, numeric ranges.
     Streams the file (bounded memory); values are compared stripped."""
@@ -156,7 +189,7 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
         if not stat.S_ISREG(os.stat(path).st_mode):
             return "%s: not a regular file" % (name or os.path.basename(path)), {}
         sep = table_sep(path)
-        f = open(path, encoding="utf-8-sig", errors="replace", newline="")
+        f = open(path, encoding=table_encoding(path), errors="replace", newline="")
     except OSError:
         return "%s: unreadable" % (name or os.path.basename(path)), {}
     header, head, nrows, nbytes, truncated = None, [], 0, 0, False
@@ -221,7 +254,7 @@ def quoted_terms(instruction):
 
 def data_context(task):
     """Returns (context_text, problems) for a workspace with data files."""
-    parts, problems, csv_infos, table_paths = [], [], [], []
+    parts, problems, csv_infos, table_paths, soft = [], [], [], [], []
     files = list_files(task.cwd)
     for p in files[:30]:
         rel = os.path.relpath(p, task.cwd)
@@ -241,7 +274,8 @@ def data_context(task):
         # Absent from every table that has this column (and all of them were fully listed).
         if having and all(term.lower() not in {v.lower() for v in vals} for vals in having) and \
                 not any(info.get("truncated") for info in csv_infos):
-            problems.append("%s '%s' not found in data" % (col, term))
+            # Only a hint for the planner (plurals, synonyms, typos): the model decides.
+            soft.append("%s '%s' not found in data" % (col, term))
     # Columns announced in the instruction must exist.
     # Columns announced as "The file X has columns a,b,c" must exist in that file. Only the
     # simple single-file comma list is checked; anything less clear is left to the model.
@@ -251,8 +285,9 @@ def data_context(task):
         hdrs = [info for p, info in zip(table_paths, csv_infos)
                 if os.path.basename(p) == os.path.basename(fname) or os.path.relpath(p, task.cwd) == fname]
         if len(hdrs) == 1:
-            hdr = {h.lower() for h in hdrs[0].get("header", [])}
-            missing = [c for c in announced if c.lower() not in hdr]
+            norm = lambda x: re.sub(r"[\s_]+", "_", x.strip().lower())
+            hdr = {norm(h) for h in hdrs[0].get("header", [])}
+            missing = [c for c in announced if norm(c) not in hdr]
             if missing:
                 problems.append("columns missing in file: %s" % ",".join(missing))
     if not files:
@@ -267,6 +302,7 @@ def data_context(task):
     text = "\n\n".join(parts)
     if len(text) > MAX_DATA_CTX:
         text = text[:MAX_DATA_CTX] + "\n... (%d files in total)" % len(files)
+    task.soft_hints = soft
     return text, problems
 
 
@@ -361,13 +397,17 @@ def _bm25_rank(passages, query_words, k1=1.2, b=0.75):
     return sorted(range(len(toks)), key=lambda i: -scores[i]), scores
 
 
-def prose_passages(docs, instr, limit):
+def prose_passages(docs, instr, limit, extra=""):
     """Two rounds of BM25 over paragraphs: by the question, then by the capitalised names the
     first-round passages mention (the bridge entities of a multi-hop question)."""
     passages = _passages(docs)
     if not passages:
         return ""
     q = [w for w in _norm(instr).split() if w not in _STOP and len(w) > 2]
+    if extra:
+        # Names the model reached in a first attempt: they lead to the next hop's paragraphs.
+        names = re.findall(r"\b([A-Z][\w\-]+(?:\s+[A-Z][\w\-]+)*)\b", extra)
+        q += [w for n in names for w in _norm(n).split() if w not in _STOP and len(w) > 2]
     order, scores = _bm25_rank(passages, q)
     chosen, size = [], 0
     for i in order[:6]:
@@ -458,13 +498,13 @@ def _fmt_doc(rel, text):
     return body if body.startswith("#") else "[%s]\n%s" % (rel, body)
 
 
-def kb_fallback_text(task, small=8000, limit=8000):
-    """Second look at the base: the whole base if small, else a wider excerpt."""
+def kb_fallback_text(task, small=20000, limit=12000, hint=""):
+    """Second look at the base: the whole base if it fits `small`, else the best paragraphs
+    (BM25, two rounds; `hint` = the first reply, whose names point at the next hop)."""
     full = kb_full_text(task, limit=small + 1)
     if len(full) <= small:
         return full
-    text, _p, _n = kb_context(task, full_limit=0, max_docs=30)
-    return text[:limit]
+    return prose_passages(kb_docs(task), task.short_instruction(), limit, extra=hint)
 
 
 def kb_full_text(task, limit=MAX_KB_CTX):
@@ -581,8 +621,8 @@ def _ev(n, known):
     """Tiny interpreter over a whitelist of pure, bounded operations (test files are untrusted:
     nothing is ever passed to eval/exec)."""
     if isinstance(n, ast.Call):
-        key = ast.dump(n)
-        if key in known:
+        key = _call_key(n)
+        if key is not None and key in known:
             return known[key]
         if not (isinstance(n.func, ast.Name) and n.func.id in _SAFE_FUNCS) or n.keywords:
             raise _NoEval()
@@ -641,6 +681,17 @@ def _target_names(tree):
     return mods, funcs
 
 
+def _call_key(node):
+    """Identity of a call by callee text and evaluated arguments, so that m.f(2), m.f(1 + 1)
+    and m.f(x=2)-style spellings of the same call compare equal. None if not evaluable."""
+    try:
+        args = tuple(repr(_ev(a, {})) for a in node.args)
+        kws = tuple(sorted((k.arg or "", repr(_ev(k.value, {}))) for k in node.keywords))
+    except Exception:
+        return None
+    return (ast.unparse(node.func), args, kws)
+
+
 def _pure_call(node, mods, funcs, impure=frozenset()):
     """m.f(<literals>) or f(<literals>) on the code under test, with at least one argument and
     f free of module state: the only calls whose result can be assumed identical wherever they
@@ -658,11 +709,7 @@ def _pure_call(node, mods, funcs, impure=frozenset()):
         return False
     if name in impure or not (node.args or node.keywords):
         return False
-    for a in list(node.args) + [k.value for k in node.keywords]:
-        ok, _ = _lit(a)
-        if not ok:
-            return False
-    return True
+    return _call_key(node) is not None
 
 
 _MUTATORS = {"append", "extend", "insert", "pop", "remove", "clear", "update", "add", "discard",
@@ -726,14 +773,30 @@ def test_contradictions(src, impure=frozenset()):
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr.startswith("assert"):
             asserts.append(n)
-    known, problems = {}, []
+    known, problems, almost = {}, [], {}
     for n in asserts:
+        if n.func.attr == "assertAlmostEqual" and len(n.args) >= 2 and _pure_call(n.args[0], mods, funcs, impure):
+            ok, val = _lit(n.args[1])
+            places = 7
+            for kw in n.keywords:
+                if kw.arg == "places" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, int):
+                    places = kw.value.value
+            if len(n.args) >= 3 and isinstance(n.args[2], ast.Constant) and isinstance(n.args[2].value, int):
+                places = n.args[2].value
+            if ok and isinstance(val, (int, float)) and not any(k.arg == "delta" for k in n.keywords):
+                key = _call_key(n.args[0])
+                for v0, p0 in almost.get(key, []):
+                    if abs(v0 - val) > 2 * 10 ** (-min(places, p0)):
+                        problems.append("%s expected both %r and %r" % (ast.unparse(n.args[0])[:80], v0, val))
+                almost.setdefault(key, []).append((val, places))
         if n.func.attr in ("assertEqual", "assertEquals") and len(n.args) >= 2:
             a, b = n.args[0], n.args[1]
             for call, lit in ((a, b), (b, a)):
                 ok, val = _lit(lit)
                 if ok and _pure_call(call, mods, funcs, impure):
-                    key = ast.dump(call)
+                    key = _call_key(call)
+                    if key is None:
+                        break
                     if key in known and known[key] != val:
                         problems.append("%s expected both %r and %r" % (ast.unparse(call), known[key], val))
                     known.setdefault(key, val)
@@ -920,13 +983,37 @@ def missing_imports(test_src, cwd):
         tree = ast.parse(test_src)
     except SyntaxError:
         return []
-    mods = set()
+    guarded = set()
+    for n in ast.walk(tree):  # imports inside try/except ImportError are optional
+        if isinstance(n, ast.Try) and any(h.type is None or "ImportError" in ast.unparse(h.type)
+                                          or "ModuleNotFoundError" in ast.unparse(h.type) for h in n.handlers):
+            for x in n.body:
+                for y in ast.walk(x):
+                    if isinstance(y, (ast.Import, ast.ImportFrom)):
+                        guarded.add(id(y))
+    mods, dotted = set(), set()
     for n in ast.walk(tree):
+        if id(n) in guarded:
+            continue
         if isinstance(n, ast.Import):
             mods.update(a.name.split(".")[0] for a in n.names)
+            dotted.update(a.name for a in n.names if "." in a.name)
         elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
             mods.add(n.module.split(".")[0])
+            if "." in n.module:
+                dotted.add(n.module)
     out = []
+    # A submodule of a local package that is not there ("from pkg.extra import ...").
+    for d in sorted(dotted):
+        parts = d.split(".")
+        for root in [cwd] + sorted({os.path.dirname(os.path.dirname(p)) for p in list_files(cwd, 2000)
+                                   if os.path.basename(os.path.dirname(p)) == parts[0]}):
+            base = os.path.join(root, parts[0])
+            if os.path.isdir(base):
+                sub = os.path.join(root, *parts)
+                if not (os.path.isdir(sub) or os.path.isfile(sub + ".py")):
+                    out.append(d)
+                break
     for m in sorted(mods):
         if m in sys.stdlib_module_names or m in sys.builtin_module_names:
             continue
