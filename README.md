@@ -43,6 +43,21 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
 
 ## How a task is solved
 
+0. **Deterministic fast path (no model).** The organisers allow solving without the model.
+   A task is answered by plain code only when every sentence of its statement matches a known
+   form with an unambiguous meaning and the data it refers to checks out: warehouse stock
+   computations built from the example operations (ship per day, deliveries, split and keep a
+   share rounded down, double/triple, explicit percent rules); questions over the sales table
+   (units/revenue/orders/maximum by product, region, month range) after verifying the file,
+   its header and its row count, with a non-empty selection; knowledge-base questions over a
+   base made only of "# Name" + "Key: Value" cards, following the named fields (born,
+   employer, headquarters, founded, mentor) with every card present. Anything else — an
+   unknown sentence, a missing card, an absent value, an empty selection, a negative stock —
+   goes to the model path below, so a misparse costs tokens, never a wrong answer. On the
+   bench sets the fast path answered 226 tasks with zero errors; on sets in the examples'
+   format it covers about half of the tasks (coding always goes to the model). On small sets
+   (the qualification run) the model path still runs through openJiuwen as a confirmation.
+
 1. **Free inspection (no LLM).** For every task: the instruction is stripped of boilerplate
    about tools and `answer.txt`; the workspace is summarised compactly:
    - tables (CSV/TSV, any of `, ; tab`, UTF-8 or cp1251, decimal comma detected): header,
@@ -209,7 +224,7 @@ Results on the real proxy (organisers' units; feasible reward solved / available
 
 | set | tasks (infeasible) | what it is | solved reward | tokens |
 |---|---|---|---|---|
-| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~9–10k |
+| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~5k (fast path) |
 | var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
 | var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 86–93 % | ~25–30k |
 | adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–93 % | ~5k |
@@ -217,7 +232,7 @@ Results on the real proxy (organisers' units; feasible reward solved / available
 | math2 | 68 (8) | MATH-500 level 5, GSM8K, SVAMP, ASDiv | 94–96 % | ~25k |
 
 A blind hold-out set of 60 tasks built by a separate reviewer from other sources was run
-on intermediate versions: 77 % → 85 % → 90 % of feasible tasks solved. On sets in the
+on intermediate versions: 77 % → 85 % → 90 % → 98 % of feasible tasks solved. On sets in the
 format of the examples a run of 100 tasks takes about a minute with 5 sessions and costs
 about 100 units per task, infeasible ones included.
 

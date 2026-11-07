@@ -116,6 +116,10 @@ class Run:
         # Computations whose program needed control flow get a second opinion (gated) - on
         # a hard math set this lifted 53/60 to ~58/60; plain arithmetic is never re-checked.
         self.math_xc = os.environ.get("HARNESS_MATH_XC", "gated")
+        # Statements understood completely are answered without the model (allowed by the
+        # organisers); everything else takes the model path.
+        self.fast = os.environ.get("HARNESS_FAST", "1") == "1"
+        self.fast_answers = {}
         self.llm = LLM(os.environ.get("LLM_BASE_URL", ""), api_key, budget=budget, log=trace)
         self.solver = Solver(self.ask)
         self.cost = {}
@@ -246,6 +250,7 @@ class Run:
     def run(self):
         from harness.context import load_tasks
         from harness.llm import BudgetExhausted
+        from harness import fastpath
         from harness.solver import Outcome
 
         tasks = load_tasks(self.tasks_dir)
@@ -279,6 +284,19 @@ class Run:
                 continue
             if t.kind == "coding" and info.get("initial_pass") and not info.get("problems"):
                 self.finish_task(t, Outcome("solved", "DONE", "tests already pass"))
+                continue
+            fast = fastpath.solve(t, t.kind) if self.fast else None
+            if fast is not None:
+                # The whole statement was understood: answered without the model.
+                self.finish_task(t, Outcome(fast[0], fast[1] if fast[0] == "solved" else None, "fast path: " +
+                                            ("deterministic" if fast[0] == "solved" else fast[1])))
+                if not self.careful:
+                    continue
+                # Small (qualification) sets: the model path still runs through openJiuwen as a
+                # confirmation; the deterministic answer stays on disk.
+                self.fast_answers[t.name] = fast
+            if t.name in self.fast_answers:
+                heapq.heappush(heap, (-1.0, next(seq), 0, t))
                 continue
             heapq.heappush(heap, (-(t.reward * p / max(c, 1.0)), next(seq), 0, t))
         self.summary.record_estimates(self.estimates)
@@ -322,6 +340,10 @@ class Run:
             # Only technical errors are retried later: on the bench no task that failed its
             # checks twice was ever rescued by the reasoning rung, while infeasible ones burned
             # thousands of tokens there.
+            if t.name in self.fast_answers:
+                trace({"ev": "fast_confirm", "task": t.name, "fast": self.fast_answers[t.name][1],
+                       "model": out.answer, "agree": out.answer == self.fast_answers[t.name][1]})
+                return  # the deterministic answer is already written
             if level == 0 and (out.status == "error" or (out.status == "failed" and t.kind in self.retry_kinds)):
                 with hlock:
                     retry.append(t)
