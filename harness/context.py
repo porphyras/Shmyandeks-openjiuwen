@@ -401,7 +401,7 @@ def _bm25_rank(passages, query_words, k1=1.2, b=0.75):
     return sorted(range(len(toks)), key=lambda i: -scores[i]), scores
 
 
-def prose_passages(docs, instr, limit, extra=""):
+def prose_passages(docs, instr, limit, extra="", own_articles=0):
     """Two rounds of BM25 over paragraphs: by the question, then by the capitalised names the
     first-round passages mention (the bridge entities of a multi-hop question)."""
     passages = _passages(docs)
@@ -415,7 +415,27 @@ def prose_passages(docs, instr, limit, extra=""):
               if w not in _STOP and w not in ("answer", "not", "found", "reply", "knowledge") and len(w) > 2]
     order, scores = _bm25_rank(passages, q)
     chosen, size = [], 0
+    if extra and own_articles:
+        # The entities the model already reached (named in its previous reply) are described in
+        # their own articles: those come first, the latest-named entity first (the next hop).
+        own = {}
+        for rel, text in docs:
+            for key in (_norm(_title(rel, text)), _norm(os.path.splitext(os.path.basename(rel))[0])):
+                if len(key) >= 5:
+                    own.setdefault(key, _title(rel, text))
+        seen = []
+        for n in reversed(re.findall(r"\b([A-Z][\w\-']+(?:\s+[A-Z][\w\-']+)+)\b", extra)):
+            t = own.get(_norm(n))
+            if t and t not in seen:
+                seen.append(t)
+        for t in seen[:own_articles]:
+            for i, (pt, para) in enumerate(passages):
+                if pt == t and i not in chosen and size < limit // 2:
+                    chosen.append(i)
+                    size += len(para)
     for i in order[:6]:
+        if i in chosen:
+            continue
         if scores[i] <= 0:
             break
         chosen.append(i)
@@ -503,13 +523,13 @@ def _fmt_doc(rel, text):
     return body if body.startswith("#") else "[%s]\n%s" % (rel, body)
 
 
-def kb_fallback_text(task, small=20000, limit=12000, hint=""):
+def kb_fallback_text(task, small=20000, limit=12000, hint="", own_articles=0):
     """Second look at the base: the whole base if it fits `small`, else the best paragraphs
     (BM25, two rounds; `hint` = the first reply, whose names point at the next hop)."""
     full = kb_full_text(task, limit=small + 1)
     if len(full) <= small:
         return full
-    return prose_passages(kb_docs(task), task.short_instruction(), limit, extra=hint)
+    return prose_passages(kb_docs(task), task.short_instruction(), limit, extra=hint, own_articles=own_articles)
 
 
 def kb_full_text(task, limit=MAX_KB_CTX):

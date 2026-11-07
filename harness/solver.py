@@ -396,6 +396,7 @@ class Solver:
         corpus_all = None
         guess = ""
         chain_retry = False
+        replies, third_round = [], False
         for attempt in range(4):
             if chain_retry is True:
                 # The previous one-line request was answered with an explanation that hit the
@@ -417,6 +418,7 @@ class Solver:
             body = "%s\nKnowledge base %s:\n%s\n%s" % (instr, "excerpt" if attempt == 0 else "files", excerpt, tail)
             msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
             reply = self.ask(task, msgs, level, mt)
+            replies.append(reply or "")
             raw = _raw_answer(reply)
             unfinished = (not raw and "ANSWER:" not in (reply or "").upper() and not says_impossible(reply)
                           and len((reply or "").strip()) > 40)
@@ -443,6 +445,15 @@ class Solver:
                 continue
             if attempt == 0 and not self.careful:
                 break
+            if attempt == 1 and not raw and not third_round and not info.get("kb_cards", True):
+                # A large prose base, seen as paragraphs: the second reply usually reached one more
+                # entity of the chain ("... mentored by X; X's employer is not in the text") - the
+                # paragraphs about the entities named so far, X's own article first, are one more look.
+                third_round = True
+                more = ctx.kb_fallback_text(task, hint="\n".join(replies), own_articles=3)
+                if more and more != excerpt:
+                    excerpt = more
+                    continue
             if attempt <= 2 and self.careful and level < 2:
                 level = 2  # qualification: the tasks are solvable, ask the reasoning model too
                 continue

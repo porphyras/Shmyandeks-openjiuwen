@@ -83,6 +83,9 @@ tokens the budget is counted in.
      paragraphs and the best ones picked by BM25 in two rounds (by the question, then by the
      capitalised names the first-round paragraphs mention — the bridge entities of a
      multi-hop question), up to 9k characters; the model answers with a short chain of facts;
+     when it ends with "not found", the next look is picked with the names its reply reached,
+     and on a third look the own articles of those entities come first (the chain usually
+     stops one hop short: "... mentored by X; X's employer is not in the text");
    - code: the tests are run first; the model sees the source, the failing tests and a
      compressed test log.
 2. **One short call** to a no-reasoning model with a tiny prompt; the model returns an
