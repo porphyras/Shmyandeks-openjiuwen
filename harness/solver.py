@@ -5,6 +5,7 @@ the harness only gathers context, runs what the model wrote and checks the resul
 """
 import ast
 import builtins
+import itertools
 import keyword
 import os
 import re
@@ -172,6 +173,45 @@ class Solver:
         return info
 
     # ------------------------------------------------------------------ coding
+    def _place_ambiguous_methods(self, task, tests, files, target, elsewhere, current, merged, code):
+        """A method sent without its class that a base class and its overrides all define
+        ("def adjust(self, cents): ..."): try it in each of those classes and keep the placement
+        the tests like best. Returns (merged, ok, test_out) or None when nothing was ambiguous."""
+        variants = []
+        for p in files:
+            amb = ambiguous_methods(current[p], code)
+            if not amb or len(amb) > 2:
+                continue
+            for combo in list(itertools.product(*[[(n, c) for c in cls[:4]] for n, cls in amb.items()]))[:6]:
+                m = merge_functions(current[p], code, add_new=(p == target),
+                                    skip_new=elsewhere if p == target else (), owner_choice=dict(combo))
+                if m is not None and m != current[p]:
+                    v = dict(merged)
+                    v[p] = m
+                    variants.append(v)
+        if not variants:
+            return None
+        if merged:
+            variants.insert(0, merged)
+        best, t_end = None, time.time() + 90
+        for v in variants:
+            if time.time() > t_end and best:
+                break
+            for p in files:
+                if not _write(p, v.get(p, current[p])):
+                    return None
+            ok, out = self._run_tests(task, tests)
+            names = ctx.failing_test_names(out)
+            score = (ok, -(len(names) if names or ok else 999))  # a crash (no test ran) is worst
+            if best is None or score > best[0]:
+                best = (score, v, ok, out)
+            if ok:
+                break
+        _, v, ok, out = best
+        for p in files:
+            _write(p, v.get(p, current[p]))
+        return v, ok, out
+
     def _run_tests(self, task, tests, budget_s=45.0):
         outs, ok = [], True
         t_end = time.time() + budget_s
@@ -506,11 +546,15 @@ class Solver:
                                     skip_new=elsewhere if p == target else ())
                 if m is not None and m != current[p]:
                     merged[p] = m
+            tried = self._place_ambiguous_methods(task, tests, files, target, elsewhere, current, merged, code)
+            if tried:
+                merged, ok, out = tried
             if not merged:
                 continue
-            if not all(_write(p, m) for p, m in merged.items()):
-                return Outcome("error", note="cannot write source")
-            ok, out = self._run_tests(task, tests)
+            if not tried:
+                if not all(_write(p, m) for p, m in merged.items()):
+                    return Outcome("error", note="cannot write source")
+                ok, out = self._run_tests(task, tests)
             if self._tests_tampered(info):
                 # Restored; run once more to tell our patch from a concurrent outside change.
                 ok, out = self._run_tests(task, tests)
@@ -735,7 +779,32 @@ def _write(path, text):
     return atomic_write(path, text)
 
 
-def merge_functions(original, patch, add_new=True, skip_new=()):
+def _method_owners(tree):
+    """{method name: [classes defining it]} for the top-level classes of a module."""
+    owners = {}
+    for n in tree.body:
+        if isinstance(n, ast.ClassDef):
+            for b in n.body:
+                if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    owners.setdefault(b.name, []).append(n.name)
+    return owners
+
+
+def ambiguous_methods(original, patch):
+    """{name: [classes]} for methods the patch sends without their class ("def adjust(self, ...)")
+    that several classes of `original` define (a base method and its overrides)."""
+    try:
+        otree, ptree = ast.parse(original), ast.parse(patch)
+    except (SyntaxError, ValueError):
+        return {}
+    top = {n.name for n in otree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    owners = _method_owners(otree)
+    return {n.name: owners[n.name] for n in ptree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name not in top
+            and n.args.args and n.args.args[0].arg in ("self", "cls") and len(owners.get(n.name, [])) > 1}
+
+
+def merge_functions(original, patch, add_new=True, skip_new=(), owner_choice=None):
     """Replace top-level defs/classes of `original` by same-named ones from `patch`
     (classes are merged method by method); new definitions and imports are added.
     Returns None if the patch does not parse or defines nothing."""
@@ -775,18 +844,15 @@ def merge_functions(original, patch, add_new=True, skip_new=()):
             others.append((assign_key(node), text))
     # Methods sent without their class ("def pop(self): ...") go back into the class that has them.
     top_defs = {n.name for n in otree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    owners = {}
-    for n in otree.body:
-        if isinstance(n, ast.ClassDef):
-            for b in n.body:
-                if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    owners.setdefault(b.name, []).append(n.name)
+    owners = _method_owners(otree)
     reroute = {}
     for node in ptree.body:
         if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name not in top_defs
                 and node.args.args and node.args.args[0].arg in ("self", "cls")):
             cls_names = owners.get(node.name, [])
             newdefs.pop(node.name, None)  # never add a bare method as a module function
+            if len(cls_names) > 1 and (owner_choice or {}).get(node.name) in cls_names:
+                cls_names = [owner_choice[node.name]]  # the caller tried the candidates
             if len(cls_names) == 1:  # ambiguous when several classes define it: leave it out
                 s_, e_ = span(node)
                 reroute.setdefault(cls_names[0], []).append("\n".join(plines[s_:e_]))
