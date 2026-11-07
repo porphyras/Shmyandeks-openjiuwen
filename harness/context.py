@@ -13,6 +13,7 @@ MAX_FILE_READ = 256 * 1024
 MAX_INSTRUCTION = 6000
 MAX_DATA_CTX = 4000
 MAX_KB_CTX = 30000
+PROSE_FULL = 14000  # a prose base up to this size is sent whole (~400 units)
 
 csv.field_size_limit(1 << 24)
 
@@ -218,7 +219,7 @@ def quoted_terms(instruction):
 
 def data_context(task):
     """Returns (context_text, problems) for a workspace with data files."""
-    parts, problems, csv_infos = [], [], []
+    parts, problems, csv_infos, table_paths = [], [], [], []
     files = list_files(task.cwd)
     for p in files[:30]:
         rel = os.path.relpath(p, task.cwd)
@@ -226,6 +227,7 @@ def data_context(task):
             brief, info = csv_brief(p, name=rel)
             parts.append(brief)
             csv_infos.append(info)
+            table_paths.append(p)
         else:
             t = read_text(p, 600)
             parts.append("%s:\n%s" % (rel, t[:600]))
@@ -238,13 +240,18 @@ def data_context(task):
             if vals is not None and term.lower() not in {v.lower() for v in vals}:
                 problems.append("%s '%s' not found in data" % (col, term))
     # Columns announced in the instruction must exist.
-    m = re.search(r"has columns ([\w,]+)", instr)
+    # Columns announced as "The file X has columns a,b,c" must exist in that file. Only the
+    # simple single-file comma list is checked; anything less clear is left to the model.
+    m = re.search(r"[Tt]he file ([\w./-]+) has columns ([\w]+(?:,[\w]+)+)(?=\s*\(\d+ rows\))", instr)
     if m and csv_infos:
-        announced = [c for c in m.group(1).split(",") if c]
-        hdr = set(csv_infos[0].get("header", []))
-        missing = [c for c in announced if c not in hdr]
-        if missing:
-            problems.append("columns missing in file: %s" % ",".join(missing))
+        fname, announced = m.group(1), m.group(2).split(",")
+        hdrs = [info for p, info in zip(table_paths, csv_infos)
+                if os.path.basename(p) == os.path.basename(fname) or os.path.relpath(p, task.cwd) == fname]
+        if len(hdrs) == 1:
+            hdr = {h.lower() for h in hdrs[0].get("header", [])}
+            missing = [c for c in announced if c.lower() not in hdr]
+            if missing:
+                problems.append("columns missing in file: %s" % ",".join(missing))
     if not files:
         problems.append("no data files")
     problems += missing_named_files(task, files)
@@ -295,6 +302,19 @@ def _entities(instruction):
     return out
 
 
+def kb_structured(docs):
+    """True for fact-card bases ("Key: Value" lines); False for prose paragraphs."""
+    kv = total = 0
+    for _r, t in docs[:200]:
+        for line in t.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            total += 1
+            kv += bool(re.match(r"^[A-Za-z][\w ]{0,30}:\s+\S", line))
+    return total > 0 and kv >= 0.5 * total
+
+
 def kb_context(task, full_limit=600, max_docs=12):
     """Pick the documents mentioning the entities of the question and follow name links
     (a document that mentions another document's title pulls it in). Falls back to the
@@ -331,6 +351,17 @@ def kb_context(task, full_limit=600, max_docs=12):
         if not new:
             break
     complete = False
+    if not kb_structured(docs):
+        # Prose: link expansion by titles is unreliable, multi-hop facts hide in text.
+        if total <= PROSE_FULL:
+            sel = list(range(len(docs)))
+            text = "\n".join(_fmt_doc(*docs[i]) for i in sel)
+            return text, [], (len(sel), True, False)  # whole base sent: NOT FOUND is reliable
+        words = set(w for w in _norm(instr).split() if w not in _STOP and len(w) > 2)
+        sel = sorted(range(len(docs)), key=lambda i: -len(words & set(normd[i][0].split())))[:max_docs]
+        sel = sorted(set(sel) | set(picked[:max_docs]))
+        text = "\n".join(_fmt_doc(*docs[i]) for i in sel)[:MAX_KB_CTX]
+        return text, [], (len(sel), False, False)
     if picked and total > full_limit:
         sel = picked
         # The subject document was found by its exact title and link expansion was not cut
@@ -347,7 +378,7 @@ def kb_context(task, full_limit=600, max_docs=12):
     text = "\n".join(_fmt_doc(*docs[i]) for i in sel)
     if len(text) > MAX_KB_CTX:
         text, complete = text[:MAX_KB_CTX], False
-    return text, problems, (len(sel), complete)
+    return text, problems, (len(sel), complete, True)
 
 
 def _fmt_doc(rel, text):

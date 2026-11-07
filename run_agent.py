@@ -100,7 +100,9 @@ class Run:
         self.workers = max(1, min(5, args.workers or int(env_float("HARNESS_WORKERS", 5))))
         self.infeasible_answer = os.environ.get("HARNESS_INFEASIBLE_ANSWER", "")
         self.second_pass = os.environ.get("HARNESS_SECOND_PASS", "1") == "1"
-        self.retry_failed = os.environ.get("HARNESS_RETRY_FAILED", "0") == "1"
+        # Kinds whose failed checks get one more try on the reasoning model. On the hard bench set
+        # this rescued 3 of 4 failed code fixes (~700 units per call) and none of the others.
+        self.retry_kinds = set(k for k in os.environ.get("HARNESS_RETRY_FAILED", "coding").split(",") if k)
         # Kinds whose answers get an independent second opinion even in a full run.
         self.crosscheck_kinds = set(k for k in os.environ.get("HARNESS_CROSSCHECK", "").split(",") if k)
         self.llm = LLM(os.environ.get("LLM_BASE_URL", ""), api_key, budget=budget, log=trace)
@@ -296,7 +298,7 @@ class Run:
             # Only technical errors are retried later: on the bench no task that failed its
             # checks twice was ever rescued by the reasoning rung, while infeasible ones burned
             # thousands of tokens there.
-            if level == 0 and (out.status == "error" or (out.status == "failed" and self.retry_failed)):
+            if level == 0 and (out.status == "error" or (out.status == "failed" and t.kind in self.retry_kinds)):
                 with hlock:
                     retry.append(t)
             self.finish_task(t, out)

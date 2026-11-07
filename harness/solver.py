@@ -4,6 +4,8 @@ The model always does the solving (writes the program / names the fact / fixes t
 the harness only gathers context, runs what the model wrote and checks the result.
 """
 import ast
+import builtins
+import keyword
 import os
 import re
 import time
@@ -105,7 +107,8 @@ class Solver:
                 info["ctx"], info["problems"] = ctx.data_context(task)
                 info["kind"] = "data"
             elif t == "search" or (task.workspace and os.path.isdir(os.path.join(task.cwd, "kb"))):
-                info["ctx"], info["problems"], (info["ndocs"], info["kb_complete"]) = ctx.kb_context(task)
+                info["ctx"], info["problems"], (info["ndocs"], info["kb_complete"], info["kb_cards"]) = \
+                    ctx.kb_context(task)
                 info["kind"] = "search"
             elif t == "coding" or (task.workspace and ctx.find_tests(task.cwd, task.instruction)):
                 info["kind"] = "coding"
@@ -237,6 +240,20 @@ class Solver:
             prelude = "import pandas as pd\ndf = %s\n" % load
             body += ("\ndf = %s is loaded. Reply in a ```python block with one pandas expression "
                      "over df whose value is the answer." % load)
+        elif DATA_EXPR and 2 <= len(tables) <= 6:
+            names, loads = set(), []
+            for tp in tables:
+                rel = os.path.relpath(tp, task.cwd)
+                var = re.sub(r"\W+", "_", os.path.splitext(os.path.basename(tp))[0]).strip("_").lower() or "t"
+                if var[0].isdigit() or keyword.iskeyword(var) or hasattr(builtins, var) or var in ("pd", "df"):
+                    var = "t_" + var
+                while var in names:
+                    var += "_"
+                names.add(var)
+                loads.append("%s = pd.read_csv(%r%s)" % (var, rel, ", sep='\\t'" if ctx.table_sep(tp) == "\t" else ""))
+            prelude = "import pandas as pd\n" + "\n".join(loads) + "\n"
+            body += ("\nLoaded with pandas: %s. Reply in a ```python block with a short pandas program using them "
+                     "(no comments) that prints only the answer." % "; ".join(loads))
         else:
             if NO_COMMENTS:
                 body += ("\nReply with a python3 program in a ```python block: one assignment per quantity the task "
@@ -256,7 +273,7 @@ class Solver:
             if attempt:
                 msgs = msgs[:2] + [{"role": "assistant", "content": "```python\n%s\n```" % (model_code or code)},
                                    {"role": "user", "content": last_err + " Reply with the fixed program only."}]
-            reply = self.ask(task, msgs, level + attempt, 400)
+            reply = self.ask(task, msgs, level + attempt, 600 if data else 400)
             if says_impossible(reply) and (data or MATH_HINT):
                 return Outcome("infeasible", note="model: impossible")
             code = extract_code(reply)
@@ -302,9 +319,9 @@ class Solver:
         excerpt = info.get("ctx") or ""
         full = None
         for attempt in range(2):
-            if SEARCH_STYLE == "chain":
+            if SEARCH_STYLE == "chain" or not info.get("kb_cards", True):
                 tail = "Reply with the chain of facts in a few words, then ANSWER: <value> (or NOT FOUND)."
-                mt = 90
+                mt = 90 if info.get("kb_cards", True) else 160
             else:
                 tail = "Reply with one line: ANSWER: <value> (or NOT FOUND). No explanation."
                 mt = 40

@@ -85,7 +85,9 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
 
 Detected without spending tokens where possible:
 - data: a quoted value right after a column name ("product 'gizmo'") does not occur in that
-  column, or announced columns are missing from the file;
+  column; a file the instruction names does not exist; columns announced in the exact form of
+  the examples ("The file X has columns a,b,c (N rows)") are missing from that file (any other
+  wording is left to the model, so the check never fires on a feasible task);
 - knowledge base: an entity of the question is not mentioned anywhere in the base;
 - code: the tests contradict each other — a static check over the test file collects every
   `assertEqual(call, literal)`, flags the same call required to equal two different values,

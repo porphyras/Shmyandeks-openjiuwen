@@ -10,8 +10,10 @@ Verification (no downloaded code is executed):
     the GSM-Hard target, be a positive integer, and every intermediate result must stay
     non-negative (and integral wherever the original was integral). Two independent derivations
     agreeing is the acceptance criterion.
-Infeasible variants are built from other GSM8K items by replacing a quantity the solution needs
-with a vague word ("some"), or by deleting the only sentence that states it.
+Infeasible variants (vague_quantity) are built from other GSM8K items by replacing a count the
+solution needs with a vague word ("some", "several", ...); replaying the chain with a different
+value for it must change the answer. (Deleting a whole sentence was tried and dropped: the
+shortened problems often stayed answerable.)
 """
 import difflib
 import json
@@ -189,10 +191,6 @@ def gsm8k_candidates(gsm):
     return out
 
 
-def hardness(c):
-    return (c["steps"], len(c["question"]))
-
-
 VAGUE_WORDS = ["some", "several", "a few", "a number of"]
 
 
@@ -244,7 +242,8 @@ def make_infeasible(gsm, used, n):
 # GSM8K test items excluded after manual review (inconsistent wording in the original problem).
 #   144: the problem switches the person's name (Kim / Lucas); 777: "only $6 of the cost";
 #   814: "how much money" is ambiguous between quarters and dollars; 690: "2/5 times more".
-EXCLUDE = {144, 777, 814, 690}
+#   1071: unclear whether the host counts towards the party size.
+EXCLUDE = {144, 777, 814, 690, 1071}
 
 
 def make(dl, n_hard=13, n_gsm=12, n_inf=4):

@@ -64,7 +64,7 @@ def main():
         os.makedirs(ws)
         with open(os.path.join(td, "task.json"), "w", encoding="utf-8") as f:
             json.dump({"task_id": tid, "task_type": t["type"], "instruction": t["instruction"],
-                       "reward": reward}, f, indent=2, ensure_ascii=False)
+                       "reward": reward}, f, indent=2)
             f.write("\n")
         for rel, data in sorted(t["files"].items()):
             p = os.path.join(ws, rel)
