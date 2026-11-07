@@ -414,7 +414,7 @@ class Solver:
         current = dict(original)
         instr = task.short_instruction()
         out = info.get("test_out", "")
-        for attempt in range(1 if level >= 2 else 2):  # one reasoning attempt is enough
+        for attempt in range(2):  # the reasoning rung also gets a second look with the new test log
             body = (instr + "\n" + self._coding_context(task, srcs, tests, out) +
                     "\nReply in one ```python block with only the functions you changed (complete definitions). "
                     "Fix the real bug generally; do not special-case test inputs.")
