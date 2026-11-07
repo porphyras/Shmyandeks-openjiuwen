@@ -591,17 +591,26 @@ def looks_complex(task, outcome):
     if re.search(r"\b[a-z]\s*\^|\^\s*\d|sqrt|\b[a-z]\s*[*/]\s*[a-z(]|\([a-z]\s*[+-]", instr):
         return True
     # Numbers typed into the program that the statement never mentions: computed mentally.
-    stated = {float(x.replace(",", "")) for x in re.findall(r"\d[\d,]*(?:\.\d+)?", instr)}
+    # Numbers that are labels, not quantities (dates, times, ids) do not count as "stated".
+    label_free = re.sub(r"\b\d{1,2}:\d{2}\b|#\s*\d+|\b(?:19|20)\d\d\b|\b(?:no\.|number|invoice|order|id|room)\s*\d+",
+                        " ", instr, flags=re.I)
+    stated = {float(x.replace(",", "")) for x in re.findall(r"\d[\d,]*(?:\.\d+)?", label_free)}
+    derived = set(stated)
+    for x in stated:  # percent / fraction forms of a stated number (25 -> 0.25, 0.75, 75)
+        derived |= {x / 100, 1 - x / 100, 100 - x, 1 + x / 100}
+        if x:
+            derived.add(round(1 / x, 12))
+    derived = {round(v, 9) for v in derived}
     try:
         tree = ast.parse(code)
     except SyntaxError:
         return False
-    common = {0, 1, 2, 3, 10, 12, 24, 60, 100, 1000, 365, 3600, 7, 52}
+    common = {0, 1, 2, 3, 4, 5, 7, 10, 12, 24, 52, 60, 100, 1000, 365, 3600, 0.5, 0.25, 0.75, 0.1, 0.01}
     used = set()
     for n in ast.walk(tree):
         if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) and not isinstance(n.value, bool):
             used.add(float(abs(n.value)))
-            if abs(n.value) not in common and float(abs(n.value)) not in stated:
+            if abs(n.value) not in common and round(float(abs(n.value)), 9) not in derived:
                 return True
     # A number of the statement that the program never uses: a transcription slip
     # ("5 deliveries" typed as 2) or a distractor - either way worth a second look.
