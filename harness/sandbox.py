@@ -17,6 +17,9 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
     "PYTHONDONTWRITEBYTECODE": "1",
+    # Never read a __pycache__ shipped in the task: a source rewritten with the same size in the
+    # same second as a cached .pyc would otherwise run the stale cached code.
+    "PYTHONPYCACHEPREFIX": "/tmp/.no-pycache",
     "PYTHONHASHSEED": "0",
     "PYTHONIOENCODING": "utf-8",
     "MPLBACKEND": "Agg",

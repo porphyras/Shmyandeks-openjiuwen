@@ -36,9 +36,22 @@ _CLEAN = """def _clean(d):
             filled = s[~s.str.lower().isin(["", "nan", "na", "n/a", "none", "null", "-"])]
             if len(filled) and filled.str.contains(r"[,$€£ ]|^\\d", regex=True).any() and \
                     not filled.str.match(r"^0\\d").any():
-                num = pd.to_numeric(filled.str.replace(r"[$€£,\\s]", "", regex=True), errors="coerce")
+                def conv(x):
+                    x = x.str.replace(r"[$€£,]", "", regex=True).str.strip()
+                    out = pd.to_numeric(x, errors="coerce")
+                    # a number followed only by a note: "12 (est.)", "12 kg", "7*" - never dates or codes
+                    lead = pd.to_numeric(x.str.extract(r"^([-+]?\\d+(?:\\.\\d+)?)\\s*(?:\\([^)]*\\)|[A-Za-z%*~]+\\.?)$",
+                                                       expand=False), errors="coerce")
+                    return out.fillna(lead)  # "12 (est.)" -> 12, not NaN
+                num = conv(filled)
                 if num.notna().mean() >= 0.8:
-                    d[c] = pd.to_numeric(s.str.replace(r"[$€£,\\s]", "", regex=True), errors="coerce")
+                    d[c] = conv(s)
+    # a trailing summary row ("Total", "Grand total", "Итого") is not data
+    if len(d) > 2:
+        last = d.iloc[-1]
+        if any(isinstance(v, str) and _re.fullmatch(r"\\s*(grand\\s+)?totals?\\s*:?\\s*|\\s*итого\\s*:?\\s*", v, _re.I)
+               for v in last.values):
+            d = d.iloc[:-1].copy()
     return d
 """
 
@@ -337,6 +350,10 @@ class Solver:
                     code = model_code
                     continue
                 return Outcome("infeasible", note="program: impossible")
+            if rc == 0 and ans and re.search(r"\[\d+ rows x \d+ columns\]|dtype: |^Name: ", ans):
+                last_err = "The program printed a table, not the single answer value."
+                code = model_code
+                continue
             if rc == 0 and ans and ans.lower() not in ("none", "nan", "null", "inf", "-inf"):
                 return Outcome("solved", ans, code=model_code)
             km = re.search(r"KeyError: ['\"]([^'\"\n]{1,60})['\"]", err or "") if rc else None
@@ -426,8 +443,8 @@ class Solver:
             reply = self.ask(task, msgs, level + attempt, 900)
             code = extract_code(reply)
             if not code:
-                if says_impossible(reply):
-                    break
+                if says_impossible(reply) or (level + attempt >= 2 and not reply.strip()):
+                    break  # a refusal, or the reasoning model thought until the cut: no second try
                 continue
             # Each changed definition goes to the file that defines it; new ones to the target.
             merged = {}
