@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!requirements.txt
+!run_agent.py
+!harness/
+harness/__pycache__
