@@ -37,7 +37,8 @@ _TMP = "/tmp" if os.path.isdir("/tmp") else None
 PYTHON = sys.executable or "python3"
 
 
-# Children start through this tiny launcher instead of a preexec_fn (running Python code
+# Children start through this tiny launcher (it only sets resource limits and the signal mask,
+# then execs the given command) instead of a preexec_fn (running Python code
 # between fork and exec is unsafe in a multi-threaded process): it resets the signal mask
 # the harness threads use, sets resource limits and execs the real command.
 _BOOT = ("import os, signal, sys\n"
@@ -69,7 +70,9 @@ def _read_head(f):
 
 
 def run(argv, cwd, timeout=20):
-    """Returns (returncode, stdout, stderr); returncode None on timeout."""
+    """Run argv in cwd (a task directory) in its own process session, with the clean SAFE_ENV,
+    memory/file-size limits, a timeout and output captured to capped temp files.
+    Returns (returncode, stdout, stderr); returncode None on timeout."""
     env = dict(SAFE_ENV)
     if not os.path.isdir("/usr/local/bin"):
         env["PATH"] = os.environ.get("PATH", env["PATH"])

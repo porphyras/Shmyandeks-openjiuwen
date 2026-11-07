@@ -166,6 +166,7 @@ def classify_error(e):
         return "budget"  # an explicit "spent" answer (402 Payment Required in any form)
     if ("status=400" in t or "error 400" in t or "status=404" in t or "error 404" in t) and "429" not in t:
         return "fatal"
+    # "одновремен" (ru): "concurrent" - the dev proxy words its concurrency 429 in Russian
     if "429" in t or "ratelimit" in t or "rate limit" in t or "rate_limit" in t or "одновремен" in t or "too many" in t:
         return "rate"
     # Refused keys, quota wording without a clear "spent" meaning, outages: retried with

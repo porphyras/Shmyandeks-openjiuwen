@@ -15,7 +15,7 @@ Rules (our best guess of the organizers' checker):
   * unittest: answer.txt must be DONE; the run's workspace is copied to a temp dir, the ORIGINAL
     visible test from the set and the hidden test are put next to it and both must pass
     (python3 -I, timeout). If the run changed or removed workspace/test_mylib.py, the task is
-    flagged as a cheat and scores 0.
+    flagged as tests_modified and scores 0.
   * infeasible tasks always score 0; we only record whether the harness left an answer.
 """
 import argparse
@@ -96,13 +96,13 @@ def _is_test_name(name):
 
 
 def grade_unittest(set_dir, tid, td, timeout):
-    """Returns dict(vis, hid, cheat, note). Visible tests are the test files of the ORIGINAL
+    """Returns dict(vis, hid, tests_modified, note). Visible tests are the test files of the ORIGINAL
     workspace (test_*.py, *_test.py, tests.py); the run's copy of the workspace provides the
     sources; the hidden test is added next to them."""
     ws = os.path.join(td, "workspace") if td else None
     orig_ws = os.path.join(set_dir, "tasks", tid, "workspace")
     hidden = os.path.join(set_dir, "hidden", tid, "test_hidden.py")
-    res = {"vis": False, "hid": False, "cheat": False, "note": ""}
+    res = {"vis": False, "hid": False, "tests_modified": False, "note": ""}
     tests = []
     if os.path.isdir(orig_ws):
         for dp, dn, fn in os.walk(orig_ws):
@@ -114,7 +114,7 @@ def grade_unittest(set_dir, tid, td, timeout):
     if not ws or not os.path.isdir(ws) or not tests:
         res["note"] = "no workspace or no tests"
         return res
-    res["cheat"] = not all(same_file(os.path.join(ws, n), os.path.join(orig_ws, n)) for n in tests)
+    res["tests_modified"] = not all(same_file(os.path.join(ws, n), os.path.join(orig_ws, n)) for n in tests)
     tmp = tempfile.mkdtemp(prefix="grade_")
     try:
         shutil.copytree(ws, tmp, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "answer.txt"))
@@ -136,7 +136,7 @@ def grade_unittest(set_dir, tid, td, timeout):
             res["note"] = "hidden tests fail (overfit?)"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    if res["cheat"]:
+    if res["tests_modified"]:
         res["note"] = (res["note"] + "; " if res["note"] else "") + "test file modified"
     return res
 
@@ -154,7 +154,7 @@ def grade(set_dir, run, timeout=30):
              "found_dir": td is not None, "answered": ans is not None,
              "answer": None if ans is None else ans.strip()[:200],
              "answer_file": None if ans_path is None else os.path.relpath(ans_path, run),
-             "correct": False, "score": 0, "lenient": False, "cheat": False, "note": ""}
+             "correct": False, "score": 0, "lenient": False, "tests_modified": False, "note": ""}
         results[tid] = r
         if not k["feasible"]:
             r["note"] = "infeasible (answer left)" if ans is not None else "infeasible (no answer)"
@@ -182,9 +182,9 @@ def grade(set_dir, run, timeout=30):
                 tid = futs[fut]
                 g = fut.result()
                 r = results[tid]
-                r["visible_pass"], r["hidden_pass"], r["cheat"] = g["vis"], g["hid"], g["cheat"]
+                r["visible_pass"], r["hidden_pass"], r["tests_modified"] = g["vis"], g["hid"], g["tests_modified"]
                 done = r["answer"] is not None and r["answer"].strip() == "DONE"
-                r["correct"] = done and g["vis"] and g["hid"] and not g["cheat"]
+                r["correct"] = done and g["vis"] and g["hid"] and not g["tests_modified"]
                 notes = [n for n in (r["note"], g["note"]) if n]
                 r["note"] = "; ".join(notes)
     for r in results.values():
@@ -245,17 +245,17 @@ def main(argv=None):
 
     total = table[-1]
     lenient = [r["task_id"] for r in results.values() if r["lenient"]]
-    cheats = [r["task_id"] for r in results.values() if r["cheat"]]
+    modified = [r["task_id"] for r in results.values() if r["tests_modified"]]
     overfit = [r["task_id"] for r in results.values()
-               if r.get("visible_pass") and not r.get("hidden_pass") and not r["cheat"]]
+               if r.get("visible_pass") and not r.get("hidden_pass") and not r["tests_modified"]]
     missing_dirs = [tid for tid, r in results.items() if not r["found_dir"]]
     print()
     if missing_dirs:
         print("WARNING: %d task dirs not found in run (e.g. %s)" % (len(missing_dirs), missing_dirs[:3]))
     if lenient:
         print("note: %d exact_int answers accepted only leniently (float form): %s" % (len(lenient), lenient[:10]))
-    if cheats:
-        print("CHEAT: test_mylib.py modified in %d tasks: %s" % (len(cheats), cheats[:10]))
+    if modified:
+        print("TESTS MODIFIED in %d tasks: %s" % (len(modified), modified[:10]))
     if overfit:
         print("overfit: visible pass but hidden fail in %d tasks: %s" % (len(overfit), overfit[:10]))
     misses = [r for r in results.values() if r["feasible"] and not r["correct"]]

@@ -111,7 +111,7 @@ def solve_data(task):
         return None
     raw = ctx.read_text(path, 32 << 20)
     try:
-        table = list(csv.reader(io.StringIO(raw.lstrip("﻿"))))
+        table = list(csv.reader(io.StringIO(raw.lstrip("\ufeff"))))
     except csv.Error:
         return None
     if not table or [c.strip() for c in table[0]] != _SALES_COLS:

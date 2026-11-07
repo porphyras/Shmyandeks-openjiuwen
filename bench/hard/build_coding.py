@@ -32,6 +32,7 @@ SANDBOX = os.path.join(HERE, "sandbox_eval.py")
 PY = sys.executable or "python3"
 SAFE_IMPORTS = {"math", "re", "collections", "heapq", "itertools", "bisect", "operator", "string",
                 "functools"}
+# reject list for generated reference solutions (they must be plain pure functions)
 FORBIDDEN = {"open", "eval", "exec", "compile", "__import__", "input", "globals", "locals", "print",
              "exit", "quit", "setattr", "getattr", "delattr", "vars", "breakpoint", "help", "os",
              "sys", "subprocess", "shutil", "socket", "pathlib", "importlib", "memoryview"}

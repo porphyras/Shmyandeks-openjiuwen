@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fast local run without Docker (same harness code, venv python, cwd=/ to mimic read-only root).
+# Developer tool, not part of the image. Fast local run without Docker (same harness code, venv python, cwd=/ to mimic read-only root).
 #   bench/run_local.sh SET_DIR RUN_NAME [mock|forward] [BUDGET] [-- extra harness env as K=V ...]
 # Env: WORKERS (default 2 = our share of the dev account's 3 concurrent requests), PY, ENTRY (another run_agent.py).
 set -euo pipefail

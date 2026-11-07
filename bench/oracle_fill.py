@@ -3,12 +3,13 @@
 
 Usage:
   python3 bench/oracle_fill.py --set bench/sets/train_a --run /tmp/run1 [--fresh]
-        [--mode oracle|hack|wrong|none] [--where task|workspace|both] [--infeasible-answer TEXT]
+        [--mode oracle|overfit|wrong|none] [--where task|workspace|both] [--infeasible-answer TEXT]
 
 If --run does not exist (or --fresh is given) it is created as a copy of <set>/tasks.
 Modes:
   oracle  feasible tasks get the expected answer; coding gets the reference mylib.py + DONE
-  hack    like oracle, but coding gets a test-overfitted mylib (buggy code that special-cases the
+  overfit like oracle, but coding gets a test-overfitted mylib (negative control: proves the grader
+          rejects test-overfitting; (buggy code that special-cases the
           visible test inputs) -> should pass visible tests and fail hidden ones
   wrong   feasible tasks get a wrong answer; coding keeps the buggy mylib and says DONE
   none    only copy the tasks (no answers)
@@ -53,7 +54,7 @@ def visible_cases(test_src):
     return cases
 
 
-def hack_mylib(buggy_src, test_src):
+def overfit_mylib(buggy_src, test_src):
     by_fn = {}
     for name, args, val in visible_cases(test_src):
         by_fn.setdefault(name, []).append((args, val))
@@ -79,7 +80,7 @@ def main(argv=None):
     ap.add_argument("--set", required=True)
     ap.add_argument("--run", required=True)
     ap.add_argument("--fresh", action="store_true", help="delete --run first and re-copy the tasks")
-    ap.add_argument("--mode", choices=["oracle", "hack", "wrong", "none"], default="oracle")
+    ap.add_argument("--mode", choices=["oracle", "overfit", "wrong", "none"], default="oracle")
     ap.add_argument("--where", choices=["task", "workspace", "both"], default="task")
     ap.add_argument("--infeasible-answer", default=None, help="text to write for infeasible tasks")
     a = ap.parse_args(argv)
@@ -110,16 +111,16 @@ def main(argv=None):
                     print("no reference mylib for", tid, file=sys.stderr)
                     continue
                 shutil.copyfile(ref, os.path.join(ws, "mylib.py"))
-            elif a.mode == "hack":
+            elif a.mode == "overfit":
                 with open(os.path.join(ws, "mylib.py"), encoding="utf-8") as f:
                     buggy = f.read()
                 with open(os.path.join(a.set, "tasks", tid, "workspace", "test_mylib.py"), encoding="utf-8") as f:
                     test = f.read()
                 with open(os.path.join(ws, "mylib.py"), "w", encoding="utf-8") as f:
-                    f.write(hack_mylib(buggy, test))
+                    f.write(overfit_mylib(buggy, test))
             write_answer(td, "DONE", a.where)
         else:
-            val = k["expected"] if a.mode in ("oracle", "hack") else wrong_value(k["expected"], k["check"])
+            val = k["expected"] if a.mode in ("oracle", "overfit") else wrong_value(k["expected"], k["check"])
             write_answer(td, str(val), a.where)
         n += 1
     print("filled %d tasks in %s (mode=%s, where=%s)" % (n, a.run, a.mode, a.where))

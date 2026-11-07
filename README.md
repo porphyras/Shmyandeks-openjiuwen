@@ -199,6 +199,23 @@ lower the planner's success estimate: the model looks once and may answer `IMPOS
   peer is `LLM_BASE_URL`, reached through the openJiuwen client.
 - Environment read: `LLM_BASE_URL`, `LLM_API_KEY`, `TASKS`, `OUT`, `BUDGET`, optional `TOKEN_BUDGET` and
   `HARNESS_*` tuning switches. Files touched: the task directory tree and `/tmp`.
+- The harness re-executes itself once at start so that the proxy key is no longer in its own
+  initial environment (`/proc/<pid>/environ` of the processes it starts); the key arrives
+  through an inherited pipe. `HARNESS_NO_REEXEC=1` disables this.
+- Signals: an external SIGTERM/SIGINT (from outside the container's PID namespace, as sent by
+  `docker stop`/`timeout`) always ends the run at once; only signals sent by the harness's own
+  child processes are ignored.
+- The process runs as the image's default user (root): the judge's task directory must stay
+  writable; isolation comes from the judge's flags (read-only root, `--cap-drop ALL`,
+  `no-new-privileges`, pids limit). The harness adds no seccomp profile of its own.
+- Writes: `/tmp` (trace, temporary scripts) and the task directories (`answer.txt`, the fixed
+  source of code tasks, restored test files). `answer.txt` is created with mode 0666 so that a
+  grader running under another uid can read it.
+- Dependencies: `openjiuwen` pulls in many packages (model SDKs, transformers, vector stores,
+  telemetry); they are transitive and unused — the harness imports only
+  `openjiuwen.core.foundation.llm.model` and the logging configuration. All bench runs under
+  the judge's flags on an `--internal` Docker network showed no outbound attempts other than
+  `LLM_BASE_URL`.
 - Task files are untrusted data. Programs the model writes run in a separate process session,
   with an environment that has no `LLM_*` variables, a timeout, memory and file-size limits,
   and capped output; the key itself is kept out of the harness's process environment and

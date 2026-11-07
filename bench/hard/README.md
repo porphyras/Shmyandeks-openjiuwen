@@ -1,3 +1,4 @@
+<!-- Dataset download instructions for the local bench; not used by the image. -->
 # Набор hard (bench/sets/hard)
 
 Сложный оценочный набор из публичных бенчмарков в формате харнесса (раскладка как у `bench/sets/train_b`,

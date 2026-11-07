@@ -1,3 +1,4 @@
+<!-- Dataset download instructions for the local bench; not used by the image. -->
 # Набор math2 (bench/sets/math2)
 
 Дополнительный оценочный набор math из публичных бенчмарков, раскладка как у `bench/sets/hard`

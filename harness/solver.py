@@ -46,7 +46,7 @@ _CLEAN = """def _clean(d):
                 num = conv(filled)
                 if num.notna().mean() >= 0.8:
                     d[c] = conv(s)
-    # a trailing summary row ("Total", "Grand total", "Итого") is not data - when its label says
+    # a trailing summary row ("Total", "Grand total", "Итого" = ru "total") is not data - when its label says
     # so AND one of its numbers is the sum of the rows above (a product named "Total" stays)
     if len(d) > 2:
         last = d.iloc[-1]
@@ -504,7 +504,8 @@ class Solver:
                 _write(path, text)
 
     def _tests_tampered(self, info):
-        """Detects and undoes any change to the test files."""
+        """Detects and undoes any change to the test files: the exact original bytes captured
+        before any model call are written back (never anything the model produced)."""
         bad = False
         for p, h in info.get("test_hashes", {}).items():
             if ctx.file_hash(p) != h:

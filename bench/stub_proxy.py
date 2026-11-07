@@ -1,4 +1,5 @@
-"""Local stand-in for the organizers' LLM proxy.
+"""Developer tool, not part of the image: local stand-in for the organizers' LLM proxy.
+In the Docker replica only this stub (never the harness) is attached to the bridge network.
 
 Counts tokens like the organizers (input/10 + output + reasoning, no cache discount)
 and stops answering once the budget is spent.

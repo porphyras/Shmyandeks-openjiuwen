@@ -16,7 +16,7 @@ def atomic_write(path, text):
             f.flush()
             os.fsync(f.fileno())
         try:
-            os.chmod(tmp, 0o666)
+            os.chmod(tmp, 0o666)  # readable by a grader running under another uid
         except OSError:
             pass
         os.replace(tmp, path)

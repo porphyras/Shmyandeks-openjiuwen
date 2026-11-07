@@ -27,7 +27,7 @@ T0 = time.time()
 STOP = threading.Event()
 TRACE_LOCK = threading.Lock()
 TRACE_PATH = os.environ.get("HARNESS_TRACE") or "/tmp/harness_trace.jsonl"
-SECRET = [""]  # the proxy key, kept out of the environment and redacted from all output
+_REDACT_KEY = [""]  # the proxy key, kept out of the environment and redacted from all output
 
 # Model ladder per task kind: level 0 is the first attempt, higher levels are retries.
 LADDERS = {
@@ -48,8 +48,8 @@ REASONING_MAX_TOKENS = 1500
 
 def redact(text):
     text = str(text)
-    if SECRET[0] and SECRET[0] in text:
-        text = text.replace(SECRET[0], "[redacted]")
+    if _REDACT_KEY[0] and _REDACT_KEY[0] in text:
+        text = text.replace(_REDACT_KEY[0], "[redacted]")
     return text
 
 
@@ -504,7 +504,7 @@ def install_signals():
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     key = take_key()
-    SECRET[0] = key
+    _REDACT_KEY[0] = key
     install_signals()
 
     from harness.llm import configure_openjiuwen_logging

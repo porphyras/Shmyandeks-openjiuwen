@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Local replica of the judge run.
+# Developer tool, not part of the image: local replica of the judge run. Credentials for the
+# forward mode come from a local file outside the repository (~/.config/hack2/llm.env).
 #   bench/judge_sim.sh SET_DIR RUN_NAME [mock|forward] [BUDGET] [extra stub args...]
 # SET_DIR is a bench set (tasks/, keys.json, oracle_mock.json). The harness container is
 # started with exactly the judge's flags; the stub proxy runs in the same network.
@@ -31,7 +32,7 @@ sleep 1
 # ---- judge command (verbatim apart from the build context) ----
 export TASKS="$RUN/tasks" OUT="$RUN/out" TEAM="$NAME"
 export LLM_BASE_URL="http://$STUB:8000/v1" LLM_API_KEY="dummy-key"
-mkdir -p "$OUT" && chmod 777 "$OUT"
+mkdir -p "$OUT" && chmod 777 "$OUT"  # verbatim from the published judge command
 cd "$ROOT"
 B0=$(date +%s)
 docker build -q -t "hack:latest" . >/dev/null

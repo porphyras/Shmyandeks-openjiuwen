@@ -14,7 +14,7 @@ Output:
 
 Every feasible answer is recomputed by an independent checker that parses the written
 instruction and reads the written files; coding tasks are executed (buggy fails visible,
-reference passes visible + hidden, a visible-input special-casing hack fails hidden;
+reference passes visible + hidden, a visible-input special-casing fix (negative control) fails hidden;
 infeasible coding: the reference fails only because of the contradiction).
 """
 import argparse
@@ -1174,6 +1174,7 @@ FNS_REF = {f.name: f.ref for f in FNS}
 
 def compile_fn(src, name):
     ns = {}
+    # the generator's own reference source (written in this file), never task or model text
     exec(src, ns)
     return ns[name]
 
@@ -1268,7 +1269,7 @@ def gen_coding(rng, opts, inf_kind):
     bug_idx = sorted(rng.sample(range(nfun), nbug))
     bugs = {i: rng.choice(fns[i].bugs) for i in bug_idx}
 
-    srcs, fixed_srcs, methods, hidden_methods, bug_meta, bug_lines, hack_cases = [], [], [], [], [], [], []
+    srcs, fixed_srcs, methods, hidden_methods, bug_meta, bug_lines, overfit_cases = [], [], [], [], [], [], []
     vis_all = []
     for i, f in enumerate(fns):
         fixed_srcs.append(f.src)
@@ -1300,7 +1301,7 @@ def gen_coding(rng, opts, inf_kind):
             bug_meta.append([f.name, bugs[i][0]])
             new = bugs[i][2]
             bug_lines += [ln.strip() for ln in new.splitlines() if ln.strip()]
-            hack_cases.append((f.name, vis))
+            overfit_cases.append((f.name, vis))
         # hidden cases: visible + edges + random, and for buggy functions at least one extra failing case
         hid, seen = [], set()
         for args in vis + list(f.edges) + [f.gen(rng) for _ in range(4)]:
@@ -1377,15 +1378,15 @@ def gen_coding(rng, opts, inf_kind):
         "instruction": CODING_INSTRUCTION, "key": None, "files": files, "hidden": hidden,
         "meta": {"functions": [f.name for f in fns], "bugs": bug_meta, "bug_lines": bug_lines,
                  "contradiction": contradiction},
-        "_verify": {"hack_cases": hack_cases, "clean_test": render_test(clean_methods),
+        "_verify": {"overfit_cases": overfit_cases, "clean_test": render_test(clean_methods),
                     "fixed_plus": fixed + extra_fixed},
     }
 
 
-def hack_source(buggy, hack_cases):
+def overfit_source(buggy, overfit_cases):
     """A test-overfitted 'fix': special-case the visible inputs, keep the buggy code otherwise."""
     lines = [buggy.rstrip("\n"), "", ""]
-    for name, cases in hack_cases:
+    for name, cases in overfit_cases:
         pairs = ", ".join("(%r, %r)" % (list(a), FNS_BY_NAME[name].ref(*copy.deepcopy(a))) for a in cases)
         lines += ["_orig_%s = %s" % (name, name), "",
                   "def %s(*args):" % name,
@@ -1420,13 +1421,13 @@ def verify_coding(task, workroot):
             ok, out = run(src, test)
             if not ok:
                 raise TemplateError("%s fails:\n%s" % (name, out))
-        hack = hack_source(files["workspace/mylib.py"], v["hack_cases"])
-        ok, out = run(hack, vis)
+        overfit = overfit_source(files["workspace/mylib.py"], v["overfit_cases"])
+        ok, out = run(overfit, vis)
         if not ok:
-            raise TemplateError("hack should pass visible:\n%s" % out)
-        ok, out = run(hack, hid)
+            raise TemplateError("overfit fix should pass visible:\n%s" % out)
+        ok, out = run(overfit, hid)
         if ok:
-            raise TemplateError("hack passes hidden tests")
+            raise TemplateError("overfit fix passes hidden tests")
     else:
         ok, out = run(v["fixed_plus"], vis)
         if ok:

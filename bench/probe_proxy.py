@@ -1,9 +1,10 @@
-"""Probe the LLM proxy: model list, latency, usage fields. Logs usage (never the key)."""
+"""Developer tool, not part of the image: probe the LLM proxy (model list, latency, usage fields).
+The credentials come from a local file outside the repository; usage is logged, never the key."""
 import json, os, sys, time, urllib.request
 
 BASE = os.environ["LLM_BASE_URL"].rstrip("/")
 KEY = os.environ["LLM_API_KEY"]
-LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "key_usage.jsonl")
+LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy_probe.jsonl")
 
 
 def req(path, body=None, timeout=120):
