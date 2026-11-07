@@ -43,8 +43,9 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
 
 1. **Free inspection (no LLM).** For every task: the instruction is stripped of boilerplate
    about tools and `answer.txt`; the workspace is summarised compactly:
-   - CSV files: header, row count, three rows, distinct values of low-cardinality columns,
-     numeric ranges (never the whole file);
+   - tables (CSV/TSV, any of `, ; tab`, UTF-8 or cp1251, decimal comma detected): header,
+     row count, three rows, distinct values of low-cardinality columns, numeric ranges (never
+     the whole file);
    - knowledge bases of fact cards ("Key: Value" lines): only the documents that mention the
      entities of the question, plus the documents they link to by name (up to three hops); the
      whole base only as a fallback;
@@ -59,16 +60,20 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
    - computations: a Python program, one assignment per quantity of the statement, no
      comments (comment-free programs that collapse steps lose rounding details; one variable
      per quantity keeps them and costs ~25 % fewer tokens than commented code);
-   - data questions on a single CSV: one pandas expression over `df` (the harness loads the
-     file and prints the value) — about half the tokens of a full program;
-   - knowledge-base questions: a single line `ANSWER: <value>` (or `NOT FOUND`);
+   - data questions: the harness loads every table with pandas (separator, encoding and
+     decimal mark detected; text columns that are numbers in disguise — "1,250", "$12.50" —
+     converted, blanks/NA as NaN) and the model writes one pandas expression over `df` (a short
+     pandas program when there are several tables) — about half the tokens of a full program;
+   - knowledge-base questions: a single line `ANSWER: <value>` (or `NOT FOUND`); for prose a
+     short chain of facts first;
    - code fixes: only the functions it changed; the prompt shows the source and the
      compressed test log (the failing assertion lines are in the traceback, so the test file
      itself is not sent).
 3. **Free verification.** Programs are executed in the task directory (clean environment
    without `LLM_*` variables, timeout, output cap, memory limit); code fixes are merged into
    the file by function name and the tests are re-run (test files are hash-checked and never
-   edited); knowledge-base answers must occur verbatim in the base.
+   edited); knowledge-base answers must occur verbatim in the base (and take its spelling),
+   except numbers computed for counting/difference questions.
 4. **Second opinion for risky computations.** A computation answer is re-derived by the
    other no-reasoning model when the evidence says the first program may be a shortcut: it
    needed control flow or imports, the statement is long or algebraic, the program contains
@@ -77,8 +82,16 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
    majority. Plain step-by-step arithmetic is never re-checked. On a hard math set
    (MATH level 5, GSM8K, SVAMP, ASDiv) this lifted 53/60 to 56–58/60; on example-style
    sets it costs ~20–30 % more tokens on computation tasks only.
-5. **Retry / escalation** only on a failed check: one retry with the error text on the next
-   model of the ladder, and a final pass for still-failed tasks if budget and time remain.
+5. **Retry / escalation** only on a failed check: one retry with the error text (and a
+   warmer temperature) on the next model of the ladder; a knowledge-base question gets a
+   second, wider look (whole base or more paragraphs, also following the names the first
+   reply reached). Code fixes that still fail get a final pass on the reasoning model (two
+   attempts); technical errors are retried at the end. A wrong guess costs nothing, so the
+   best available answer is always written — except `DONE` for code, which needs passing tests.
+
+Small sets (up to 10 tasks — the qualification run has 2 feasible tasks) are solved "for
+sure": no free infeasibility verdicts, refusals are retried and escalated, and every
+answer without a free check gets an independent second opinion.
 
 ## Token accounting and task selection
 
@@ -91,27 +104,37 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
 - Tasks are processed greedily by `reward × p(success) / expected cost` with up to 5 parallel
   sessions. With an unknown budget this order is near-optimal because every task costs well
   under 1 % of the budget; when a budget is given, tasks that no longer fit are skipped in
-  favour of cheaper ones. When the proxy stops answering (budget exhausted), the run stops
-  and keeps everything already written.
+  favour of cheaper ones, and the remainder is checked before every call. Proxy errors never
+  end the run on their own (failed calls cost nothing): each call is retried with backoff for
+  up to three minutes, then the task waits for a later pass; only an explicit out-of-quota
+  answer stops new calls. Everything solved is already on disk at any moment.
 
 ## Infeasible tasks
 
 Detected without spending tokens where possible:
-- data: a quoted value right after a column name ("product 'gizmo'") does not occur in that
-  column; a file the instruction names does not exist; columns announced in the exact form of
-  the examples ("The file X has columns a,b,c (N rows)") are missing from that file (any other
-  wording is left to the model, so the check never fires on a feasible task);
-- knowledge base: an entity of the question is not mentioned anywhere in the base;
-- code: the tests contradict each other — a static check over the test file collects every
-  `assertEqual(call, literal)`, flags the same call required to equal two different values,
-  and evaluates the remaining assertions about those calls (`len(...)`, comparisons,
-  `assertTrue/False`, `assertIn`, ...) with the required values substituted; tests importing
-  a module that exists neither in the standard library nor in the workspace;
-- programs: a model-written program that divides by zero (split into 0 parts, empty selection).
+Free verdicts are reserved for signals that cannot fire on a solvable task (checked on ten
+bench sets, including pairs of a solvable task and its minimally edited unsolvable twin:
+zero false verdicts):
+- data: columns announced in the exact form of the examples ("The file X has columns a,b,c
+  (N rows)") are missing from that file; every table is empty and the question asks for an
+  average or an extreme; no table exists at all where a file is named;
+- code: the tests contradict each other. A static check over the test file (no test code is
+  executed — a tiny interpreter evaluates literals, comparisons and a few pure builtins)
+  flags the same pure call required to equal two different values (calls compared by their
+  evaluated arguments; also `assertAlmostEqual`, `assertIsInstance` with incompatible types,
+  `x > x` on a pure call, or one unchanged object asked for two values), and evaluates the
+  other assertions about those calls with the required values substituted. Functions with
+  state — module-level data they change, `self` attributes they change, counters, random or
+  time — are never treated as pure. Also: tests importing a module or submodule that exists
+  nowhere (optional imports inside `try/except ImportError` are ignored), tests reading a
+  file nobody creates;
+- programs: a model-written program that divides by zero on a computation, or fails on a
+  column the task names but no table has.
 
-Otherwise the model may answer `IMPOSSIBLE` / `NOT FOUND`, which stops work on the task
-(no retries). Code fixes that still fail after two attempts are not escalated further.
-Infeasible tasks get no `answer.txt` (configurable with `HARNESS_INFEASIBLE_ANSWER`).
+Weaker signals (a quoted value missing from its column, an entity not found by name) only
+lower the planner's success estimate: the model looks once and may answer `IMPOSSIBLE` /
+`NOT FOUND`, which stops work on the task. Infeasible tasks get no `answer.txt`
+(configurable with `HARNESS_INFEASIBLE_ANSWER`).
 
 ## Robustness
 
@@ -125,8 +148,12 @@ Infeasible tasks get no `answer.txt` (configurable with `HARNESS_INFEASIBLE_ANSW
   re-executes itself and receives the key through a pipe), and it is redacted from all output.
 - Test files and fixed sources are snapshotted before any model call and restored if anything
   changes them; all answers are rewritten from memory at the end of the run.
-- Proxy errors: rate limiting (429) is waited out; key/quota refusals or a proxy that stops
-  answering end the run cleanly; transient errors are retried a bounded number of times.
+- Proxy errors: rate limits and outages are waited out with backoff (failed calls are free);
+  only an explicit out-of-quota answer stops new calls; a base URL given without `/v1` or with
+  a trailing `/chat/completions` is normalised.
+- As PID 1 of the container the harness acts only on signals from outside the container;
+  signals sent by programs it runs are ignored. Children start through a tiny exec launcher
+  (no Python code between fork and exec in a multi-threaded process).
 
 ## Security model
 

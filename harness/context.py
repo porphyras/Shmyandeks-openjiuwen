@@ -720,11 +720,20 @@ _MUTATORS = {"append", "extend", "insert", "pop", "remove", "clear", "update", "
              "setdefault", "popitem", "sort", "reverse", "write", "seek", "send", "__setitem__"}
 
 
+_PURE_BUILTINS = {"len", "abs", "min", "max", "sum", "sorted", "round", "str", "int", "float", "bool",
+                  "isinstance", "range", "list", "tuple", "dict", "set", "frozenset", "enumerate", "zip",
+                  "any", "all", "reversed", "divmod", "pow", "repr", "ord", "chr", "map", "filter", "hash",
+                  "type", "super", "ValueError", "TypeError", "KeyError", "IndexError", "ZeroDivisionError"}
+
+
 def impure_functions(sources):
-    """Functions that read or change module-level state (global/nonlocal, mutating a module
-    name, random/time), or any function in a source that defines classes' methods with self
-    state - those are never treated as pure by the contradiction check."""
+    """Names of functions/methods that may keep or change state, decided conservatively and
+    transitively: module data or self attributes they change (directly, through mutator
+    calls, heapq/bisect-style helpers, setattr, next() on stored iterators), self passed to
+    any non-builtin call, global/nonlocal, generators, random/time - and anything that calls
+    such a function or method. Only these never count as pure calls in contradiction checks."""
     out = set()
+    defs, calls = {}, {}
     for src in sources:
         try:
             tree = ast.parse(src)
@@ -740,49 +749,60 @@ def impure_functions(sources):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             local = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
+            is_method = bool(fn.args.args) and fn.args.args[0].arg == "self"
+            stateful = set(module_names) | ({"self"} if is_method else set())
             bad = False
+            called = set()
+
+            def root_name(x):
+                while isinstance(x, (ast.Attribute, ast.Subscript, ast.Call)):
+                    x = x.func if isinstance(x, ast.Call) else x.value
+                return x.id if isinstance(x, ast.Name) else None
+
             for x in ast.walk(fn):
                 if isinstance(x, (ast.Global, ast.Nonlocal, ast.Yield, ast.YieldFrom)):
-                    bad = True
-                elif isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute):
-                    base = x.func.value
-                    if x.func.attr in _MUTATORS and isinstance(base, ast.Name) and base.id in module_names \
-                            and base.id not in local:
-                        bad = True
-                    if isinstance(base, ast.Name) and base.id in ("random", "time", "datetime", "uuid", "itertools", "secrets", "os"):
-                        bad = True
-                elif isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id in ("next", "input", "open") \
-                        and any(isinstance(a, ast.Name) and a.id in module_names for a in x.args):
                     bad = True
                 elif isinstance(x, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
                     targets = x.targets if isinstance(x, (ast.Assign, ast.Delete)) else [x.target]
                     for tg in targets:
-                        root = tg
-                        while isinstance(root, (ast.Subscript, ast.Attribute)):
-                            root = root.value
-                        if isinstance(root, ast.Name) and root.id in module_names and root.id not in local \
-                                and root is not tg:
+                        r = root_name(tg)
+                        if r in stateful and (r not in local or r == "self") and r != getattr(tg, "id", None):
                             bad = True
-            if not bad and fn.args.args and fn.args.args[0].arg == "self":
-                for x in ast.walk(fn):  # a method that changes its object
-                    if isinstance(x, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
-                        tg = x.targets if isinstance(x, ast.Assign) else [x.target]
-                        for t_ in tg:
-                            root = t_
-                            while isinstance(root, (ast.Subscript, ast.Attribute)):
-                                root = root.value
-                            if isinstance(root, ast.Name) and root.id == "self" and root is not t_:
+                elif isinstance(x, ast.Call):
+                    f = x.func
+                    if isinstance(f, ast.Attribute):
+                        base = root_name(f.value)
+                        if base == "self" and isinstance(f.value, ast.Name):
+                            called.add(f.attr)  # self.other_method(...)
+                        if f.attr in _MUTATORS and base in stateful and (base not in local or base == "self"):
+                            bad = True
+                        if base in ("random", "time", "datetime", "uuid", "itertools", "secrets", "os",
+                                    "heapq", "bisect", "sys", "io"):
+                            bad = True
+                    elif isinstance(f, ast.Name):
+                        if f.id in ("setattr", "delattr", "next", "iter", "input", "open", "exec", "eval", "print"):
+                            bad = True
+                        elif f.id not in _PURE_BUILTINS:
+                            called.add(f.id)  # a module function (resolved transitively)
+                    # self or stored state handed to a non-builtin call may be changed there
+                    fname = getattr(f, "id", None)
+                    if fname not in _PURE_BUILTINS:
+                        for a in list(x.args) + [k.value for k in x.keywords]:
+                            r = root_name(a)
+                            if r == "self" or (r in module_names and r not in local):
                                 bad = True
-                    elif isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute) and x.func.attr in _MUTATORS:
-                        base = x.func.value
-                        while isinstance(base, (ast.Attribute, ast.Subscript)):
-                            base = base.value
-                        if isinstance(base, ast.Name) and base.id == "self":
-                            bad = True
-            if bad:
-                out.add(fn.name)
+            defs.setdefault(fn.name, False)
+            defs[fn.name] = defs[fn.name] or bad
+            calls.setdefault(fn.name, set()).update(called)
+    out = {n for n, b in defs.items() if b}
+    changed = True
+    while changed:  # anything calling an impure (or unknown non-builtin) function is impure
+        changed = False
+        for n, cs in calls.items():
+            if n not in out and any(c in out or c not in defs for c in cs):
+                out.add(n)
+                changed = True
     return out
-
 
 def test_contradictions(src, impure=frozenset()):
     """Find assertions that no implementation can satisfy together: the same call required to
