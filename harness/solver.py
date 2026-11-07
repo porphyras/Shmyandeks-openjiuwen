@@ -93,6 +93,8 @@ def normalize_answer(s):
     m = re.fullmatch(r"(-?\d+)\.0+", s)
     if m:
         s = m.group(1)
+    if re.fullmatch(r"-?\d+\.\d{9,}", s):  # float noise: 0.30000000000000004 -> 0.3
+        s = ("%.8f" % float(s)).rstrip("0").rstrip(".")
     return s
 
 
