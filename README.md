@@ -31,6 +31,19 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   unknown arguments are ignored. The proxy does not report the remainder: the harness counts
   every call the organisers' way and stays within the budget.
 
+### openJiuwen components used
+
+- `openjiuwen.core.foundation.llm.model.init_model` / `Model.invoke` (OpenAI-compatible client
+  configured with `ModelClientConfig`/`ModelRequestConfig`) for every model call: one client per
+  model, a single persistent event loop, `usage_metadata` (input, output, reasoning tokens) read
+  from each `AssistantMessage` for the budget ledger;
+- `openjiuwen.core.common.logging.log_config.configure_log_config` to keep the framework's
+  logging off the read-only filesystem and out of stdout.
+
+The harness does not use openJiuwen's agents or tool schemas on purpose: every task is solved
+with one compact prompt, and tool schemas or conversation history would multiply the input
+tokens the budget is counted in.
+
 ### Output
 
 - `answer.txt` is written right after each task, atomically (temp file in the same directory,
