@@ -26,7 +26,14 @@ def atomic_write(path, text):
             os.unlink(tmp)
         except OSError:
             pass
-        return False
+        # A directory we may not create files in can still hold a writable file: write in place.
+        try:
+            data = text.encode("utf-8", "replace") if isinstance(text, str) else bytes(text)
+            with open(path, "wb") as f:
+                f.write(data)
+            return True
+        except Exception:
+            return False
 
 
 def atomic_write_bytes(path, data):

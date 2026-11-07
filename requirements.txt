@@ -183,6 +183,8 @@ idna==3.20
     #   httpx2
     #   requests
     #   yarl
+iniconfig==2.3.1
+    # via pytest
 intelli-router==0.1.0b1
     # via openjiuwen
 jaraco-classes==3.4.0
@@ -329,6 +331,7 @@ packaging==26.3
     #   huggingface-hub
     #   matplotlib
     #   opentelemetry-instrumentation
+    #   pytest
     #   transformers
 pandas==3.1.1
     # via pymilvus
@@ -344,6 +347,8 @@ pillow==13.0.0
     #   pdfplumber
 platformdirs==4.14.5
     # via fastmcp-slim
+pluggy==1.7.0
+    # via pytest
 portalocker==4.4.2
     # via openjiuwen
 propcache==0.5.4
@@ -377,6 +382,7 @@ pydantic-settings==2.16.2
     #   mcp
 pygments==2.21.0
     # via
+    #   pytest
     #   rich
     #   rich-rst
 pyjwt==2.15.1
@@ -393,6 +399,8 @@ pyperclip==1.11.0
     # via fastmcp-slim
 pysbd==0.3.4
     # via openjiuwen
+pytest==8.4.2
+    # via -r requirements.in
 python-dateutil==4.0.0
     # via
     #   dateparser

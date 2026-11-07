@@ -32,7 +32,7 @@ class LLM:
     def __init__(self, base_url, api_key, budget=None, log=None, loop=None):
         from openjiuwen.core.foundation.llm.model import init_model
         self._init_model = init_model
-        self.base_url = base_url
+        self.base_url = normalize_base(base_url)
         self.api_key = api_key
         self.budget = budget
         self.log = log or (lambda rec: None)
@@ -40,10 +40,7 @@ class LLM:
             loop = asyncio.new_event_loop()
             threading.Thread(target=loop.run_forever, name="llm-loop", daemon=True).start()
         self.loop = loop
-        self.fail_since = 0.0
-        self.down_after = 90.0
-        self.auth_fail = 0
-        self.last_ok = time.time()
+        self.alt_tried = False
         self.models = {}
         self.rate_wait = 0.0
         self.lock = threading.Lock()
@@ -87,13 +84,19 @@ class LLM:
         m = self._model(model)
         return await m.invoke(messages, max_tokens=max_tokens, temperature=temperature, timeout=timeout)
 
-    def chat(self, model, messages, max_tokens, temperature=0.0, timeout=90.0, tag=""):
-        """Blocking call usable from worker threads (runs on the harness event loop)."""
+    def chat(self, model, messages, max_tokens, temperature=0.0, timeout=90.0, tag="", max_wait=180.0):
+        """Blocking call usable from worker threads (runs on the harness event loop).
+
+        Failed calls cost nothing, so errors never end the run: rate limits, refused keys,
+        outages are retried with backoff for up to `max_wait` seconds per call (then the task
+        is left for a later pass). Only an explicit "out of quota/budget" answer stops new
+        calls, and a 400 context-length error fails just this call."""
         if self.exhausted:
             raise BudgetExhausted()
         last = None
-        attempt = 0
-        while attempt < 3:
+        give_up = time.time() + max_wait
+        n = 0
+        while True:
             t0 = time.time()
             try:
                 coro = self._invoke(model, messages, max_tokens, temperature, timeout)
@@ -106,52 +109,20 @@ class LLM:
             except Exception as e:  # classify provider errors
                 last = e
                 kind = classify_error(e)
+                n += 1
                 self.log({"ev": "llm_error", "tag": tag, "model": model, "kind": kind,
                           "err": str(e)[:300], "dt": round(time.time() - t0, 2)})
                 if kind == "budget":
-                    with self.lock:
-                        self.auth_fail += 1
-                        definite = self.auth_fail >= 3 or "insufficient_quota" in str(e).lower() \
-                            or "budget" in str(e).lower()
-                    if definite:
-                        self.exhausted = True
-                        raise BudgetExhausted() from e
-                    time.sleep(3.0)  # a refused key once may be a hiccup; failed calls are free
-                    continue
-                if kind == "rate":
-                    # Concurrency/rate limit: wait and retry without burning an attempt, but a
-                    # proxy that keeps refusing for minutes is treated as out of budget.
-                    with self.lock:
-                        self.rate_wait += 2.0
-                        too_long = time.time() - self.last_ok > 600
-                    if too_long:
-                        self.exhausted = True
-                        raise BudgetExhausted() from e
-                    time.sleep(2.0)
-                    continue
-                with self.lock:
-                    self.consecutive_fail += 1
-                    if self.consecutive_fail == 1:
-                        self.fail_since = time.time()
-                    # Failed calls are free: only a proxy that stays down for minutes is
-                    # taken as "budget spent" (a short restart must not end the run).
-                    many = self.consecutive_fail >= 6 and time.time() - self.fail_since > self.down_after
-                if many:
-                    # The proxy stopped answering: most likely the budget is gone.
                     self.exhausted = True
                     raise BudgetExhausted() from e
                 if kind == "fatal":
+                    if self._try_alt_base(e):
+                        continue
                     break
-                attempt += 1
-                time.sleep(min(20.0, 2.0 * attempt * attempt))
-                if attempt >= 3 and time.time() - self.fail_since < self.down_after:
-                    attempt = 2  # keep trying this call while the outage is short
+                if time.time() > give_up or self.exhausted:
+                    break
+                time.sleep(min(3.0, 1.0 + n) if kind == "rate" else min(30.0, 2.0 ** min(n, 5)))
                 continue
-            with self.lock:
-                self.consecutive_fail = 0
-                self.rate_wait = 0.0
-                self.auth_fail = 0
-                self.last_ok = time.time()
             text = msg.content if isinstance(msg.content, str) else str(msg.content or "")
             reasoning = getattr(msg, "reasoning_content", None) or ""
             pin, pout, rt, cost = self._charge(model, getattr(msg, "usage_metadata", None), len(text) + len(reasoning))
@@ -160,6 +131,21 @@ class LLM:
                       "finish": getattr(msg, "finish_reason", None)})
             return text, cost, getattr(msg, "finish_reason", None)
         raise CallFailed(str(last)[:200])
+
+    def _try_alt_base(self, err):
+        """A 404 from a base URL given without /v1 (or with /chat/completions): switch once."""
+        t = str(err).lower()
+        if self.alt_tried or "404" not in t:
+            return False
+        self.alt_tried = True
+        alt = alternative_base(self.base_url)
+        if not alt:
+            return False
+        with self.lock:
+            self.base_url = alt
+            self.models = {}
+        self.log({"ev": "base_url_switched"})
+        return True
 
 
 def classify_error(e):
@@ -175,15 +161,30 @@ def classify_error(e):
     t = " ".join(text).lower()
     if ("status=400" in t or "error 400" in t or "status=413" in t) and ("context" in t or "too long" in t or "length" in t):
         return "fatal"  # prompt too long for the model: a per-task problem, not the budget
-    if "insufficient_quota" in t or "status=402" in t or "error 402" in t or "budget" in t:
+    if "insufficient_quota" in t or "budget exhausted" in t or "budget exceeded" in t or "out of budget" in t:
         return "budget"
-    # Rate/concurrency limits come before any "quota"/"limit" wording: they are waited out.
+    if ("status=400" in t or "error 400" in t or "status=404" in t or "error 404" in t) and "429" not in t:
+        return "fatal"
     if "429" in t or "ratelimit" in t or "rate limit" in t or "rate_limit" in t or "одновремен" in t or "too many" in t:
         return "rate"
-    if "quota" in t:
-        return "budget"
-    if any(s in t for s in ("status=401", "status=403", "error 401", "error 403", "invalid_api_key")):
-        return "budget"  # the proxy refusing the key is treated like a spent budget
-    if any(s in t for s in ("status=400", "error 400", "status=404", "error 404")):
-        return "fatal"
+    # Refused keys, quota wording without a clear "spent" meaning, outages: retried with
+    # backoff (failed calls are free).
     return "transient"
+
+
+def normalize_base(url):
+    """Accept a base given with a trailing /chat/completions or slash."""
+    u = (url or "").strip().rstrip("/")
+    for tail in ("/chat/completions", "/completions"):
+        if u.endswith(tail):
+            u = u[: -len(tail)]
+    return u
+
+
+def alternative_base(url):
+    from urllib.parse import urlparse
+    u = normalize_base(url)
+    path = urlparse(u).path
+    if not path.rstrip("/").endswith("/v1"):
+        return u + "/v1"
+    return None

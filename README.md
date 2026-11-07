@@ -45,8 +45,13 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
    about tools and `answer.txt`; the workspace is summarised compactly:
    - CSV files: header, row count, three rows, distinct values of low-cardinality columns,
      numeric ranges (never the whole file);
-   - knowledge bases: only the documents that mention the entities of the question, plus the
-     documents they link to by name (up to three hops); the whole base only as a fallback;
+   - knowledge bases of fact cards ("Key: Value" lines): only the documents that mention the
+     entities of the question, plus the documents they link to by name (up to three hops); the
+     whole base only as a fallback;
+   - knowledge bases of prose: sent whole up to 14k characters; larger ones are cut into
+     paragraphs and the best ones picked by BM25 in two rounds (by the question, then by the
+     capitalised names the first-round paragraphs mention — the bridge entities of a
+     multi-hop question), up to 9k characters; the model answers with a short chain of facts;
    - code: the tests are run first; the model sees the source, the failing tests and a
      compressed test log.
 2. **One short call** to a no-reasoning model with a tiny prompt; the model returns an
@@ -115,6 +120,18 @@ Infeasible tasks get no `answer.txt` (configurable with `HARNESS_INFEASIBLE_ANSW
 - Proxy errors: rate limiting (429) is waited out; key/quota refusals or a proxy that stops
   answering end the run cleanly; transient errors are retried a bounded number of times.
 
+## Security model
+
+- The image contains only the harness (`run_agent.py`, `harness/`) and pinned packages; the
+  bench is excluded by `.dockerignore`. Nothing is downloaded at run time; the only network
+  peer is `LLM_BASE_URL`, reached through the openJiuwen client.
+- Environment read: `LLM_BASE_URL`, `LLM_API_KEY`, `TASKS`, `OUT`, optional `TOKEN_BUDGET` and
+  `HARNESS_*` tuning switches. Files touched: the task directory tree and `/tmp`.
+- Task files are untrusted data. Programs the model writes run in a separate process session,
+  with an environment that has no `LLM_*` variables, a timeout, memory and file-size limits,
+  and capped output; the key itself is kept out of the harness's process environment and
+  redacted from every output. Test files and fixed sources are snapshotted and restored.
+
 ## Bench and trajectories
 
 `bench/` holds the local judge replica and training data tools:
@@ -126,8 +143,9 @@ Infeasible tasks get no `answer.txt` (configurable with `HARNESS_INFEASIBLE_ANSW
 - `gen_tasks.py` / `grade.py` — generator of training sets in the format of the examples
   (all four kinds plus 20 % infeasible variants of many sorts, hidden stricter tests for code)
   and the grader; a second, independently written generator was used as a cross-check;
-- `stress/` — 29 failure scenarios (broken inputs, hostile model replies, proxy outages,
-  budget exhaustion, SIGTERM).
+- failure-scenario tests (broken inputs, misbehaving model replies, proxy outages, budget
+  exhaustion, SIGTERM) are kept outside the repository: they contain deliberately hostile
+  fixtures that have no place in a submitted project.
 
 Collected trajectories: every model call of the bench runs is logged (task, kind, model,
 prompt/completion tokens, cost, latency) — `bench/trajectories/calls_v5.csv`, aggregated by

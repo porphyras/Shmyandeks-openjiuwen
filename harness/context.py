@@ -14,6 +14,7 @@ MAX_INSTRUCTION = 6000
 MAX_DATA_CTX = 4000
 MAX_KB_CTX = 30000
 PROSE_FULL = 14000  # a prose base up to this size is sent whole (~400 units)
+PROSE_PASSAGES = 9000  # larger prose bases: best paragraphs (BM25, two rounds) up to this size
 
 csv.field_size_limit(1 << 24)
 
@@ -158,7 +159,7 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
         f = open(path, encoding="utf-8-sig", errors="replace", newline="")
     except OSError:
         return "%s: unreadable" % (name or os.path.basename(path)), {}
-    header, head, nrows, nbytes = None, [], 0, 0
+    header, head, nrows, nbytes, truncated = None, [], 0, 0, False
     distinct, lo, hi, numeric = [], [], [], []
     try:
         with f:
@@ -188,6 +189,7 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
                         distinct[i].add(v)
                 nbytes += sum(len(c) for c in row) + len(row)
                 if nbytes > max_bytes:
+                    truncated = True
                     break
     except (csv.Error, OSError, ValueError):
         pass
@@ -197,7 +199,7 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
     lines = ["%s (%s-separated): %d rows; columns: %s" % (name, "tab" if sep == "\t" else "comma", nrows,
                                                          ",".join(header))]
     lines += [",".join(r) for r in head]
-    info = {"header": header, "values": {}}
+    info = {"header": header, "values": {}, "rows": nrows, "truncated": truncated}
     fmt = lambda x: str(int(x)) if x == int(x) else str(x)
     for i, col in enumerate(header):
         if numeric[i] and lo[i] is not None:
@@ -235,10 +237,11 @@ def data_context(task):
     # Cheap feasibility probe: a quoted value right after a column name ("product 'widget'")
     # must occur in that column (case-insensitive). Anything less specific is left to the model.
     for col, term in re.findall(r"\b(\w+)\s+['\"]([^'\"\n]{1,40})['\"]", instr):
-        for info in csv_infos:
-            vals = info.get("values", {}).get(col)
-            if vals is not None and term.lower() not in {v.lower() for v in vals}:
-                problems.append("%s '%s' not found in data" % (col, term))
+        having = [info["values"][col] for info in csv_infos if col in info.get("values", {})]
+        # Absent from every table that has this column (and all of them were fully listed).
+        if having and all(term.lower() not in {v.lower() for v in vals} for vals in having) and \
+                not any(info.get("truncated") for info in csv_infos):
+            problems.append("%s '%s' not found in data" % (col, term))
     # Columns announced in the instruction must exist.
     # Columns announced as "The file X has columns a,b,c" must exist in that file. Only the
     # simple single-file comma list is checked; anything less clear is left to the model.
@@ -254,7 +257,13 @@ def data_context(task):
                 problems.append("columns missing in file: %s" % ",".join(missing))
     if not files:
         problems.append("no data files")
-    problems += missing_named_files(task, files)
+    # Every table is empty (a header only) and the question asks for a statistic that does not
+    # exist for zero rows.
+    if csv_infos and all(info.get("rows", 1) == 0 for info in csv_infos) and \
+            re.search(r"\b(average|mean|median|maximum|minimum|highest|lowest|largest|smallest|most|least)\b", instr, re.I):
+        problems.append("no data rows for an average/extreme")
+    if not csv_infos:
+        problems += missing_named_files(task, files)  # a named file is only decisive with no tables at all
     text = "\n\n".join(parts)
     if len(text) > MAX_DATA_CTX:
         text = text[:MAX_DATA_CTX] + "\n... (%d files in total)" % len(files)
@@ -315,6 +324,72 @@ def kb_structured(docs):
     return total > 0 and kv >= 0.5 * total
 
 
+def _passages(docs, max_len=900):
+    """Split documents into paragraph-sized passages, each tagged with its document title."""
+    out = []
+    for rel, text in docs:
+        title = _title(rel, text)
+        for para in re.split(r"\n\s*\n", text):
+            para = para.strip()
+            if not para or para.startswith("#") and len(para) < 120:
+                continue
+            for k in range(0, len(para), max_len):
+                out.append((title, para[k:k + max_len]))
+    return out
+
+
+def _bm25_rank(passages, query_words, k1=1.2, b=0.75):
+    import math
+    toks = [_norm(t + " " + p).split() for t, p in passages]
+    n = len(toks) or 1
+    avg = sum(len(t) for t in toks) / n
+    df = {}
+    for t in toks:
+        for w in set(t):
+            df[w] = df.get(w, 0) + 1
+    scores = []
+    for i, t in enumerate(toks):
+        tf = {}
+        for w in t:
+            tf[w] = tf.get(w, 0) + 1
+        sc = 0.0
+        for w in query_words:
+            if w in tf:
+                idf = math.log(1 + (n - df[w] + 0.5) / (df[w] + 0.5))
+                sc += idf * tf[w] * (k1 + 1) / (tf[w] + k1 * (1 - b + b * len(t) / avg))
+        scores.append(sc)
+    return sorted(range(len(toks)), key=lambda i: -scores[i]), scores
+
+
+def prose_passages(docs, instr, limit):
+    """Two rounds of BM25 over paragraphs: by the question, then by the capitalised names the
+    first-round passages mention (the bridge entities of a multi-hop question)."""
+    passages = _passages(docs)
+    if not passages:
+        return ""
+    q = [w for w in _norm(instr).split() if w not in _STOP and len(w) > 2]
+    order, scores = _bm25_rank(passages, q)
+    chosen, size = [], 0
+    for i in order[:6]:
+        if scores[i] <= 0:
+            break
+        chosen.append(i)
+        size += len(passages[i][1])
+    bridge = set()
+    for i in chosen:
+        for name in re.findall(r"\b([A-Z][\w\-]+(?:\s+[A-Z][\w\-]+)*)\b", passages[i][1]):
+            bridge.update(w for w in _norm(name).split() if w not in _STOP and len(w) > 2)
+    if bridge:
+        order2, scores2 = _bm25_rank(passages, list(bridge) + q)
+        for i in order2:
+            if size >= limit:
+                break
+            if i not in chosen and scores2[i] > 0:
+                chosen.append(i)
+                size += len(passages[i][1])
+    return "\n".join("[%s] %s" % passages[i] for i in chosen)[:limit]
+
+
 def kb_context(task, full_limit=600, max_docs=12):
     """Pick the documents mentioning the entities of the question and follow name links
     (a document that mentions another document's title pulls it in). Falls back to the
@@ -332,7 +407,7 @@ def kb_context(task, full_limit=600, max_docs=12):
         if any(e and (e == ntitle or re.search(r"\b%s\b" % re.escape(e), nt)) for e in ents):
             picked.append(i)
     if ents and not picked:
-        problems.append("entity not found in knowledge base: %s" % ", ".join(ents))
+        pass  # not a free verdict: names come in many forms; the model sees the base instead
     # Exact title matches first, they are the subject documents.
     picked.sort(key=lambda i: 0 if normd[i][1] in ents else 1)
     picked = picked[:max_docs]
@@ -357,11 +432,8 @@ def kb_context(task, full_limit=600, max_docs=12):
             sel = list(range(len(docs)))
             text = "\n".join(_fmt_doc(*docs[i]) for i in sel)
             return text, [], (len(sel), True, False)  # whole base sent: NOT FOUND is reliable
-        words = set(w for w in _norm(instr).split() if w not in _STOP and len(w) > 2)
-        sel = sorted(range(len(docs)), key=lambda i: -len(words & set(normd[i][0].split())))[:max_docs]
-        sel = sorted(set(sel) | set(picked[:max_docs]))
-        text = "\n".join(_fmt_doc(*docs[i]) for i in sel)[:MAX_KB_CTX]
-        return text, [], (len(sel), False, False)
+        text = prose_passages(docs, instr, PROSE_PASSAGES)
+        return text, [], (0, False, False)
     if picked and total > full_limit:
         sel = picked
         # The subject document was found by its exact title and link expansion was not cut
@@ -569,16 +641,22 @@ def _target_names(tree):
     return mods, funcs
 
 
-def _pure_call(node, mods, funcs):
-    """m.f(<literals>) or f(<literals>) on the code under test: the only calls whose result
-    can be assumed identical wherever they appear (no objects, no state, no variables)."""
+def _pure_call(node, mods, funcs, impure=frozenset()):
+    """m.f(<literals>) or f(<literals>) on the code under test, with at least one argument and
+    f free of module state: the only calls whose result can be assumed identical wherever they
+    appear (no objects, no counters, no variables)."""
     if not isinstance(node, ast.Call):
         return False
     f = node.func
     if isinstance(f, ast.Attribute):
         if not (isinstance(f.value, ast.Name) and f.value.id in mods):
             return False
-    elif not (isinstance(f, ast.Name) and f.id in funcs):
+        name = f.attr
+    elif isinstance(f, ast.Name) and f.id in funcs:
+        name = f.id
+    else:
+        return False
+    if name in impure or not (node.args or node.keywords):
         return False
     for a in list(node.args) + [k.value for k in node.keywords]:
         ok, _ = _lit(a)
@@ -587,7 +665,56 @@ def _pure_call(node, mods, funcs):
     return True
 
 
-def test_contradictions(src):
+_MUTATORS = {"append", "extend", "insert", "pop", "remove", "clear", "update", "add", "discard",
+             "setdefault", "popitem", "sort", "reverse", "write", "seek", "send", "__setitem__"}
+
+
+def impure_functions(sources):
+    """Functions that read or change module-level state (global/nonlocal, mutating a module
+    name, random/time), or any function in a source that defines classes' methods with self
+    state - those are never treated as pure by the contradiction check."""
+    out = set()
+    for src in sources:
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        module_names = set()
+        for n in tree.body:
+            if isinstance(n, ast.Assign):
+                module_names |= {t.id for t in n.targets if isinstance(t, ast.Name)}
+            elif isinstance(n, (ast.AnnAssign, ast.AugAssign)) and isinstance(n.target, ast.Name):
+                module_names.add(n.target.id)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            local = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
+            bad = False
+            for x in ast.walk(fn):
+                if isinstance(x, (ast.Global, ast.Nonlocal, ast.Yield, ast.YieldFrom)):
+                    bad = True
+                elif isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute):
+                    base = x.func.value
+                    if x.func.attr in _MUTATORS and isinstance(base, ast.Name) and base.id in module_names \
+                            and base.id not in local:
+                        bad = True
+                    if isinstance(base, ast.Name) and base.id in ("random", "time", "datetime", "uuid", "itertools"):
+                        bad = True
+                elif isinstance(x, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+                    targets = x.targets if isinstance(x, (ast.Assign, ast.Delete)) else [x.target]
+                    for tg in targets:
+                        root = tg
+                        while isinstance(root, (ast.Subscript, ast.Attribute)):
+                            root = root.value
+                        if isinstance(root, ast.Name) and root.id in module_names and root.id not in local \
+                                and root is not tg:
+                            bad = True
+            if bad:
+                out.add(fn.name)
+    return out
+
+
+def test_contradictions(src, impure=frozenset()):
     """Find assertions that no implementation can satisfy together: the same call required to
     equal two different literals, or a property of a call contradicting its required value."""
     try:
@@ -605,13 +732,13 @@ def test_contradictions(src):
             a, b = n.args[0], n.args[1]
             for call, lit in ((a, b), (b, a)):
                 ok, val = _lit(lit)
-                if ok and _pure_call(call, mods, funcs):
+                if ok and _pure_call(call, mods, funcs, impure):
                     key = ast.dump(call)
                     if key in known and known[key] != val:
                         problems.append("%s expected both %r and %r" % (ast.unparse(call), known[key], val))
                     known.setdefault(key, val)
                     break
-    problems += _self_contradictions(asserts, mods, funcs)
+    problems += _self_contradictions(asserts, mods, funcs, impure)
     if not known:
         return problems
     for n in asserts:
@@ -619,7 +746,7 @@ def test_contradictions(src):
         if attr in ("assertEqual", "assertEquals") and len(n.args) >= 2:
             for expr, lit in ((n.args[0], n.args[1]), (n.args[1], n.args[0])):
                 okl, val = _lit(lit)
-                if okl and not _pure_call(expr, mods, funcs) and _has_call(expr):
+                if okl and not _pure_call(expr, mods, funcs, impure) and _has_call(expr):
                     ok, v = _eval_subst(expr, known)
                     if ok and v != val:
                         problems.append("%s contradicts required values" % ast.unparse(n)[:120])
@@ -677,7 +804,20 @@ def _deterministic_expr(node, mods, funcs):
     return _has_call(node)
 
 
-def _self_contradictions(asserts, mods, funcs):
+def _uses_impure(node, impure):
+    for x in ast.walk(node):
+        if isinstance(x, ast.Call):
+            f = x.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+            if name in impure:
+                return True
+            if not (x.args or x.keywords) and not (isinstance(f, ast.Name) and f.id in _SAFE_FUNCS) \
+                    and not (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Call)):
+                return True  # zero-argument module calls (counters, ids, new objects) may differ
+    return False
+
+
+def _self_contradictions(asserts, mods, funcs, impure=frozenset()):
     """x > x, x < x, x != x can never hold when x is a pure call m.f(<literals>) of a function
     the tests elsewhere treat as pure (compared with a literal). Constructors, counters and
     id generators are excluded: two calls may legitimately differ."""
@@ -692,12 +832,12 @@ def _self_contradictions(asserts, mods, funcs):
     for n in asserts:
         if n.func.attr in ("assertEqual", "assertEquals") and len(n.args) >= 2:
             for call, lit in ((n.args[0], n.args[1]), (n.args[1], n.args[0])):
-                if isinstance(call, ast.Call) and _lit(lit)[0] and _deterministic_expr(call, mods, funcs):
+                if isinstance(call, ast.Call) and _lit(lit)[0] and _deterministic_expr(call, mods, funcs) and not _uses_impure(call, impure):
                     pure_shapes.add(shape(call))
 
     def pure_expr(x):
         # same call shape compared with a literal elsewhere; not a bare constructor call
-        return (isinstance(x, ast.Call) and _deterministic_expr(x, mods, funcs) and shape(x) in pure_shapes
+        return (isinstance(x, ast.Call) and _deterministic_expr(x, mods, funcs) and not _uses_impure(x, impure) and shape(x) in pure_shapes
                 and not ast.unparse(x.func).split(".")[-1][:1].isupper())
     strict = (ast.Lt, ast.Gt, ast.NotEq)
     for n in asserts:
@@ -765,6 +905,14 @@ def missing_fixtures(test_src, cwd):
             if re.search(r"\.\w{1,5}$", p) and not os.path.exists(os.path.join(cwd, p))]
 
 
+def _module_in_tree(cwd, m):
+    for p in list_files(cwd, limit=2000):
+        b = os.path.basename(p)
+        if b == m + ".py" or (b == "__init__.py" and os.path.basename(os.path.dirname(p)) == m):
+            return True
+    return False
+
+
 def missing_imports(test_src, cwd):
     """Modules imported by a test that exist neither in the stdlib nor in the workspace."""
     import sys
@@ -782,8 +930,9 @@ def missing_imports(test_src, cwd):
     for m in sorted(mods):
         if m in sys.stdlib_module_names or m in sys.builtin_module_names:
             continue
-        if os.path.exists(os.path.join(cwd, m + ".py")) or os.path.isdir(os.path.join(cwd, m)):
-            continue
+        if os.path.exists(os.path.join(cwd, m + ".py")) or os.path.isdir(os.path.join(cwd, m)) \
+                or _module_in_tree(cwd, m):
+            continue  # local module (also src/ layouts)
         try:
             import importlib.util
             if importlib.util.find_spec(m) is not None:

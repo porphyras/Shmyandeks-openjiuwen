@@ -34,6 +34,17 @@ _TMP = "/tmp" if os.path.isdir("/tmp") else None
 PYTHON = sys.executable or "python3"
 
 
+# Children start through this tiny launcher instead of a preexec_fn (running Python code
+# between fork and exec is unsafe in a multi-threaded process): it resets the signal mask
+# the harness threads use, sets resource limits and execs the real command.
+_BOOT = ("import os, signal, sys\n"
+         "try:\n    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT})\nexcept Exception:\n    pass\n"
+         "import resource\n"
+         "for lim, val in ((resource.RLIMIT_AS, 2 << 30), (resource.RLIMIT_FSIZE, %d)):\n"
+         "    try:\n        resource.setrlimit(lim, (val, val))\n    except Exception:\n        pass\n"
+         "os.execvp(sys.argv[1], sys.argv[1:])\n" % FILE_LIMIT)
+
+
 def _limits():
     try:
         # The harness blocks SIGTERM/SIGINT in all its threads (they are read with
@@ -66,9 +77,9 @@ def run(argv, cwd, timeout=20):
         return -1, "", str(e)
     try:
         try:
-            p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
-                                 start_new_session=True, close_fds=True,
-                                 preexec_fn=_limits if os.name == "posix" else None)
+            p = subprocess.Popen([PYTHON, "-I", "-S", "-c", _BOOT] + list(argv), cwd=cwd, env=env,
+                                 stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
+                                 start_new_session=True, close_fds=True)
         except OSError as e:
             return -1, "", str(e)
         with _LOCK:
@@ -112,9 +123,12 @@ def is_sandbox_sender(pid):
     """True if `pid` belongs to one of the sandboxed sessions (a program we ran)."""
     if not pid:
         return False
+    with _LOCK:
+        if pid in CHILD_SIDS:
+            return True
     try:
         sid = os.getsid(pid)
     except OSError:
-        return False
+        return True  # already gone: it was a short-lived child, not the judge
     with _LOCK:
         return sid in CHILD_SIDS

@@ -234,6 +234,7 @@ class Run:
         # Small sets (the qualification run has 2 tasks) are solved "for sure": every answer
         # without a free check gets an independent second opinion.
         self.careful = len(tasks) <= int(env_float("HARNESS_CAREFUL_MAX", 10))
+        self.solver.careful = self.careful
         trace({"ev": "start", "tasks": len(tasks), "careful": self.careful, "dir": self.tasks_dir,
                "workers": self.workers, "budget": self.llm.budget})
         infos = self.prepare_all(tasks, deadline_s=max(30.0, min(240.0, self.time_left() / 6)))
@@ -253,7 +254,7 @@ class Run:
             info["p"], info["cost"] = p, c
             self.estimates[t.name] = {"task_id": t.id, "kind": t.kind, "estimate": round(c, 1),
                                       "p_success": round(p, 3), "ctx_chars": info.get("ctx_chars", 0)}
-            if info.get("problems") and t.kind != "coding":
+            if info.get("problems") and t.kind != "coding" and not self.careful:
                 self.finish_task(t, self.precheck_outcome(t, info))
                 continue
             if t.kind == "coding" and info.get("initial_pass") and not info.get("problems"):
@@ -275,7 +276,7 @@ class Run:
                 t.kind = info.get("kind", "math")
                 info["p"], info["cost"] = self.estimate(t, info)
                 infos[t.name] = info
-                if info.get("problems") and t.kind != "coding":
+                if info.get("problems") and t.kind != "coding" and not self.careful:
                     self.finish_task(t, self.precheck_outcome(t, info))
                     return
             need = info["cost"] * (2.5 if self.careful else 1.0)
@@ -407,8 +408,11 @@ def install_signals():
                     info = signal.sigwaitinfo(sigs)
                 except InterruptedError:
                     continue
-                if is_sandbox_sender(info.si_pid):
-                    trace({"ev": "signal_ignored", "from": info.si_pid})
+                sender = info.si_pid
+                # As PID 1 of the container, a real stop comes from outside the PID namespace
+                # (si_pid == 0); anything sent from inside is one of the programs we ran.
+                if (os.getpid() == 1 and sender != 0) or is_sandbox_sender(sender):
+                    trace({"ev": "signal_ignored", "from": sender})
                     continue
                 die(info.si_signo)
 
