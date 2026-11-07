@@ -22,6 +22,17 @@ CODING_TESTSRC = os.environ.get("HARNESS_CODING_TESTSRC", "0") == "1"
 CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S)
 
 
+_PRINT_SCALAR = """try:
+    import pandas as _pd
+    if isinstance(_r, _pd.DataFrame) and _r.size == 1:
+        _r = _r.iloc[0, 0]
+    elif isinstance(_r, _pd.Series) and len(_r) == 1:
+        _r = _r.iloc[0]
+except Exception:
+    pass
+print(_r.item() if hasattr(_r, 'item') else _r)"""
+
+
 class Outcome:
     def __init__(self, status, answer=None, note=""):
         self.status = status      # solved | failed | infeasible | error
@@ -238,9 +249,10 @@ class Solver:
             body += " If a needed number is missing or the statement is contradictory, reply IMPOSSIBLE."
         msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
         last_err = ""
+        model_code = code = ""
         for attempt in range(2):
             if attempt:
-                msgs = msgs[:2] + [{"role": "assistant", "content": "```python\n%s\n```" % code},
+                msgs = msgs[:2] + [{"role": "assistant", "content": "```python\n%s\n```" % (model_code or code)},
                                    {"role": "user", "content": last_err + " Reply with the fixed program only."}]
             reply = self.ask(task, msgs, level + attempt, 400)
             if says_impossible(reply) and (data or MATH_HINT):
@@ -256,12 +268,18 @@ class Solver:
                 last_err = "Reply with a python program that computes it, not with the answer."
                 code = reply.strip()[:200]
                 continue
+            model_code = code
             if prelude:
                 code = prelude + (code if "print(" in code else
-                                  "_r = (%s)\nprint(_r.item() if hasattr(_r, 'item') else _r)" % code.strip())
+                                  "_r = (%s)\n%s" % (code.strip(), _PRINT_SCALAR))
             rc, out, err = sandbox.run_python_code(code, task.cwd, timeout=30)
             ans = normalize_answer(last_line(out))
             if rc == 0 and says_impossible(ans):
+                if "except" in model_code and not attempt:
+                    # A refusal printed from an exception handler is often the program's own bug.
+                    last_err = "The program printed IMPOSSIBLE from an exception handler; compute directly without try/except."
+                    code = model_code
+                    continue
                 return Outcome("infeasible", note="program: impossible")
             if rc == 0 and ans:
                 return Outcome("solved", ans)
