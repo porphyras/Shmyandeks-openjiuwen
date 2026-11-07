@@ -47,7 +47,7 @@ score, and a planner that degrades gracefully when the budget is tight.
 | Judge only when two different answers stand | judge on every second opinion | judge needed on 32 of ~1,400 bench math tasks | the reasoning call is paid for only when there is something to arbitrate |
 | Code reasoning retry limit 1500 → 3000 tokens | keep 1500 | of 97 reasoning retries at 1500: 64 rescued, 9 failed, 24 cut empty; at 3000: hard-set code 24/25, 0/6 cuts | an empty cut is pure waste |
 | Order by p90 forecast; economy mode when a known budget < 1.25× queue forecast | median forecast; no economy mode | offline replay of real traces vs a 0/1-knapsack oracle: 92–100 % of the oracle from 1000 units (example format), full score from 5000; hard sets 65–87 % at 2–20k; p90 ≥ median under tight budgets | robust to the heavy tail of costs |
-| Proxy errors never end the run; only an explicit quota answer (`insufficient_quota`, HTTP 402) stops new calls | stop after N failures | an early version ended a run after 6 failed calls during an outage | failed calls are free; giving up loses every remaining task |
+| Proxy errors never end the run; only an explicit quota answer (`insufficient_quota`, HTTP 402, or "budget exhausted / exceeded / out of budget" in any error) stops new calls | stop after N failures | an early version ended a run after 6 failed calls during an outage | failed calls are free; giving up loses every remaining task |
 | Code fixes merged by function name; a method sent without its class goes to its class; with a base class and overrides, every placement is tried against the tests | drop ambiguous methods; choose by text similarity | two similarity measures (shared identifiers, token sequence) each put a replayed fix into the wrong class; trying placements: 5/5 such bench tasks solved incl. hidden tests, at lower cost than before | the tests are the free oracle |
 
 ## 4. Rejected experiments
@@ -106,7 +106,7 @@ set A came from fixing the categories reported for it.
 |---|---|---|
 | A — 60 tasks, reward 142 | successive versions on 07.11 | 77 % → 85 % → 90 % → 98 % of feasible tasks |
 | | stable 07.11 ×3 / stable 08.11 ×2 / current ×1 | 129–141 / 136–138 / 136 of 142 |
-| B — 64 tasks, reward 140 | stable 07.11 ×3 / stable 08.11 ×2 / current ×1 | 125 / 133–135 / 130 of 140 |
+| B — 64 tasks, reward 140 | stable 07.11 / stable 08.11 ×2 / current ×1 | 125 / 133–135 / 130 of 140 |
 
 Latest changes (08.11) on the tasks they target: card-base search cut-offs +2 (adv), third look
 at large prose bases +3 (var2; 8 such tasks 16/16), method placement +1 (var2 code; 5/5 with
