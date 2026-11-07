@@ -92,7 +92,8 @@ tokens the budget is counted in.
      per quantity keeps them and costs ~25 % fewer tokens than commented code);
    - data questions: the harness loads every table with pandas (separator, encoding and
      decimal mark detected; text columns that are numbers in disguise — "1,250", "$12.50" —
-     converted, blanks/NA as NaN, every column also reachable by its snake_case name) and the model writes one pandas expression over `df` (a short
+     converted, blanks/NA as NaN; when the statement calls a column `unit_price` and the file
+     header says `unit price`, the prompt names the pair) and the model writes one pandas expression over `df` (a short
      pandas program when there are several tables) — about half the tokens of a full program;
    - knowledge-base questions: a single line `ANSWER: <value>` (or `NOT FOUND`); for prose a
      short chain of facts first (also on a card base when the one-line reply ran out of tokens

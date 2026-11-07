@@ -58,12 +58,6 @@ _CLEAN = """def _clean(d):
                         abs(float(body[c].sum()) - float(last[c])) <= 1e-6 * max(1.0, abs(float(last[c]))):
                     d = body.copy()
                     break
-    # the same columns under snake_case names too ("Order ID" -> order_id): task texts often
-    # name columns that way while the file header uses spaces/capitals
-    for c in list(d.columns):
-        alias = _re.sub(r"[^0-9a-zA-Z]+", "_", str(c)).strip("_").lower()
-        if alias and alias != c and alias not in d.columns:
-            d[alias] = d[c]
     return d
 """
 
@@ -319,6 +313,12 @@ class Solver:
                      " blanks/NA are NaN. Apply any rounding the question asks for.")
             if re.search(r"; columns: [^\n]*[A-Za-z] [A-Za-z]", data):
                 body += " Column names contain spaces: index them as df['Column Name'] (or backticks in query())."
+            renamed = _task_column_names(instr, data)
+            if renamed:
+                # The statement says "unit_price", the file header "unit price": tell which is which
+                # (the frame itself keeps the file's names).
+                body += " The task's column names differ from the file's: %s." % ", ".join(
+                    "%s is df['%s']" % (a, h) for a, h in renamed)
         if data:
             body += " If the data cannot answer the question, reply IMPOSSIBLE."
         elif MATH_HINT:
@@ -551,6 +551,23 @@ class Solver:
             if os.path.splitext(os.path.basename(s))[0] in names:
                 return s
         return srcs[0]
+
+
+def _task_column_names(instr, data):
+    """[(name used by the task, header in the file)] for headers the statement spells in
+    snake_case ("Unit Price" / "unit price" -> unit_price) while never using the file's spelling."""
+    out, low = [], instr.lower()
+    for line in (data or "").splitlines():
+        m = re.search(r"; columns: (.+)$", line)
+        if not m:
+            continue
+        for h in m.group(1).split(","):
+            h = h.strip()
+            snake = re.sub(r"[^0-9a-zA-Z]+", "_", h).strip("_").lower()
+            if snake and snake != h and h.lower() not in low and re.search(r"(?<![\w])%s(?![\w])" % re.escape(snake), instr) \
+                    and (snake, h) not in out:
+                out.append((snake, h))
+    return out[:8]
 
 
 def _names_missing_column(name, instr, info):
