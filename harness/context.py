@@ -763,6 +763,22 @@ def impure_functions(sources):
                         if isinstance(root, ast.Name) and root.id in module_names and root.id not in local \
                                 and root is not tg:
                             bad = True
+            if not bad and fn.args.args and fn.args.args[0].arg == "self":
+                for x in ast.walk(fn):  # a method that changes its object
+                    if isinstance(x, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                        tg = x.targets if isinstance(x, ast.Assign) else [x.target]
+                        for t_ in tg:
+                            root = t_
+                            while isinstance(root, (ast.Subscript, ast.Attribute)):
+                                root = root.value
+                            if isinstance(root, ast.Name) and root.id == "self" and root is not t_:
+                                bad = True
+                    elif isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute) and x.func.attr in _MUTATORS:
+                        base = x.func.value
+                        while isinstance(base, (ast.Attribute, ast.Subscript)):
+                            base = base.value
+                        if isinstance(base, ast.Name) and base.id == "self":
+                            bad = True
             if bad:
                 out.add(fn.name)
     return out
@@ -809,6 +825,7 @@ def test_contradictions(src, impure=frozenset()):
                     known.setdefault(key, val)
                     break
     problems += _self_contradictions(asserts, mods, funcs, impure)
+    problems += _object_contradictions(tree, impure)
     if not known:
         return problems
     for n in asserts:
@@ -872,6 +889,36 @@ def _deterministic_expr(node, mods, funcs):
         if isinstance(x, (ast.Lambda, ast.NamedExpr, ast.Await, ast.Yield)):
             return False
     return _has_call(node)
+
+
+def _object_contradictions(tree, impure):
+    """In one test method: obj.m(<literals>) required to equal two different literals with
+    nothing touching obj in between, where m does not change its object (per the source)."""
+    out = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        seen = {}
+        for st in fn.body:
+            call = lit = None
+            if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call) and \
+                    getattr(st.value.func, "attr", "") in ("assertEqual", "assertEquals") and len(st.value.args) >= 2:
+                a0, a1 = st.value.args[0], st.value.args[1]
+                for c, l in ((a0, a1), (a1, a0)):
+                    if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name) \
+                            and _lit(l)[0] and _call_key(c) is not None and c.func.attr not in impure:
+                        call, lit = c, _lit(l)[1]
+                        break
+            if call is not None:
+                key = (call.func.value.id, _call_key(call))
+                if key in seen and seen[key] != lit:
+                    out.append("%s expected both %r and %r on an unchanged object" % (ast.unparse(call)[:80], seen[key], lit))
+                seen.setdefault(key, lit)
+                continue
+            # any other statement mentioning an object forgets what we knew about it
+            names = {x.id for x in ast.walk(st) if isinstance(x, ast.Name)}
+            seen = {k: v for k, v in seen.items() if k[0] not in names}
+    return out
 
 
 def _uses_impure(node, impure):
