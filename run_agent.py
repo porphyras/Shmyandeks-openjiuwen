@@ -145,6 +145,13 @@ class Run:
             # fixes thought until a 1500 cut and returned nothing (64 of the others fixed the
             # task). Only failed fixes ever reach this rung.
             max_tokens = max(max_tokens, REASONING_MAX_TOKENS * (2 if task.kind == "coding" else 1))
+        if reasoning:
+            # A cap on all reasoning calls together (15 % of a known budget, else 15k units): they
+            # rescue about 2 of 3 failed tasks, but must not eat the budget on a heavy set.
+            spent_r = sum(v[1] for m, v in self.llm.by_model.items() if not m.endswith("noreason"))
+            cap = 0.15 * self.llm.budget if self.llm.budget else env_float("HARNESS_REASONING_CAP", 15000.0)
+            if spent_r + max_tokens * 0.5 > cap:
+                raise SkipTask()
         rem = self.llm.remaining()
         if rem is not None:
             est = sum(len(str(m.get("content", ""))) for m in messages) / 33.0 + min(max_tokens, 300) * 0.4
