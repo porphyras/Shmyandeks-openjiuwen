@@ -109,6 +109,9 @@ class Run:
         self.retry_kinds = set(k for k in os.environ.get("HARNESS_RETRY_FAILED", "coding").split(",") if k)
         # Kinds whose answers get an independent second opinion even in a full run.
         self.crosscheck_kinds = set(k for k in os.environ.get("HARNESS_CROSSCHECK", "").split(",") if k)
+        # Computations whose program needed control flow get a second opinion (gated) - on
+        # a hard math set this lifted 53/60 to ~58/60; plain arithmetic is never re-checked.
+        self.math_xc = os.environ.get("HARNESS_MATH_XC", "gated")
         self.llm = LLM(os.environ.get("LLM_BASE_URL", ""), api_key, budget=budget, log=trace)
         self.solver = Solver(self.ask)
         self.cost = {}
@@ -204,7 +207,7 @@ class Run:
 
     @staticmethod
     def precheck_outcome(t, info):
-        from harness.solver import Outcome
+        from harness.solver import Outcome, looks_complex
         note = "precheck: " + "; ".join(info["problems"])[:300]
         if t.kind == "data" and all("not found in data" in p for p in info["problems"]):
             # "How many units of an absent product" may well be meant as 0: free to answer,
@@ -317,7 +320,9 @@ class Run:
                 with hlock:
                     retry.append(t)
             self.finish_task(t, out)
-            if out.status == "solved" and t.kind != "coding" and (self.careful or t.kind in self.crosscheck_kinds):
+            from harness.solver import looks_complex
+            gated = (t.kind == "math" and self.math_xc == "gated" and looks_complex(t, out))
+            if out.status == "solved" and t.kind != "coding" and (self.careful or t.kind in self.crosscheck_kinds or gated):
                 try:
                     out2 = self.solver.crosscheck(t, info, out)
                 except BudgetExhausted:

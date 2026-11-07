@@ -54,10 +54,11 @@ print(_r.item() if hasattr(_r, 'item') else _r)"""
 
 
 class Outcome:
-    def __init__(self, status, answer=None, note=""):
+    def __init__(self, status, answer=None, note="", code=""):
         self.status = status      # solved | failed | infeasible | error
         self.answer = answer
         self.note = note
+        self.code = code          # the program that produced the answer (programs only)
 
 
 def extract_code(text):
@@ -294,7 +295,7 @@ class Solver:
         msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
         last_err = ""
         model_code = code = ""
-        for attempt in range(2):
+        for attempt in range(1 if level >= 2 else 2):  # the reasoning rung gets one call
             if attempt:
                 msgs = msgs[:2] + [{"role": "assistant", "content": "```python\n%s\n```" % (model_code or code)},
                                    {"role": "user", "content": last_err + " Reply with the fixed program only."}]
@@ -333,7 +334,7 @@ class Solver:
                     continue
                 return Outcome("infeasible", note="program: impossible")
             if rc == 0 and ans and ans.lower() not in ("none", "nan", "null", "inf", "-inf"):
-                return Outcome("solved", ans)
+                return Outcome("solved", ans, code=model_code)
             km = re.search(r"KeyError: ['\"]([^'\"\n]{1,60})['\"]", err or "") if rc else None
             if km and data and not self.careful and _names_missing_column(km.group(1), instr, info):
                 # The question refers to a column the tables do not have ("shipping cost").
@@ -574,6 +575,39 @@ def _fix_query_columns(code, ctx_text):
                     q, changed = q2, True
             n.args[0].value = q
     return ast.unparse(tree) if changed else code
+
+
+def looks_complex(task, outcome):
+    """A computation answer worth a second opinion: the program needed control flow, imports
+    or helper functions (search, enumeration, algebra), or the statement is long. Plain
+    step-by-step arithmetic (the example style) is not re-checked."""
+    code = getattr(outcome, "code", "") or ""
+    instr = task.short_instruction()
+    if re.search(r"^\s*(for|while|if|def|import|from|try)\b", code, re.M):
+        return True
+    if len(instr) > 600:
+        return True
+    # Algebra in the statement (x^2, sqrt, a*b): mental shortcuts are common there.
+    if re.search(r"\b[a-z]\s*\^|\^\s*\d|sqrt|\b[a-z]\s*[*/]\s*[a-z(]|\([a-z]\s*[+-]", instr):
+        return True
+    # Numbers typed into the program that the statement never mentions: computed mentally.
+    stated = {float(x.replace(",", "")) for x in re.findall(r"\d[\d,]*(?:\.\d+)?", instr)}
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    common = {0, 1, 2, 3, 10, 12, 24, 60, 100, 1000, 365, 3600, 7, 52}
+    used = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) and not isinstance(n.value, bool):
+            used.add(float(abs(n.value)))
+            if abs(n.value) not in common and float(abs(n.value)) not in stated:
+                return True
+    # A number of the statement that the program never uses: a transcription slip
+    # ("5 deliveries" typed as 2) or a distractor - either way worth a second look.
+    if any(x not in used and x not in (0.0, 1.0) for x in stated):
+        return True
+    return False
 
 
 def _defined_names(src):

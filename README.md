@@ -69,7 +69,15 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
    without `LLM_*` variables, timeout, output cap, memory limit); code fixes are merged into
    the file by function name and the tests are re-run (test files are hash-checked and never
    edited); knowledge-base answers must occur verbatim in the base.
-4. **Retry / escalation** only on a failed check: one retry with the error text on the next
+4. **Second opinion for risky computations.** A computation answer is re-derived by the
+   other no-reasoning model when the evidence says the first program may be a shortcut: it
+   needed control flow or imports, the statement is long or algebraic, the program contains
+   numbers the statement never mentions (computed mentally) or ignores a number the
+   statement gives (a transcription slip). On disagreement one reasoning call decides by
+   majority. Plain step-by-step arithmetic is never re-checked. On a hard math set
+   (MATH level 5, GSM8K, SVAMP, ASDiv) this lifted 53/60 to 56–58/60; on example-style
+   sets it costs ~20–30 % more tokens on computation tasks only.
+5. **Retry / escalation** only on a failed check: one retry with the error text on the next
    model of the ladder, and a final pass for still-failed tasks if budget and time remain.
 
 ## Token accounting and task selection
