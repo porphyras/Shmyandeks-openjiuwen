@@ -34,7 +34,7 @@ score, and a planner that degrades gracefully when the budget is tight.
 
 | Decision | Alternative | Evidence | Why |
 |---|---|---|---|
-| No-reasoning models by default, reasoning only as the last rung | reasoning everywhere | mean cost per call: 144 (27B no-reasoning) vs 887 (27B reasoning) over the 8.5k calls of the versioned bench runs | the cheap call plus a free check solves most tasks; reasoning is kept for what failed a check |
+| No-reasoning models by default, reasoning only as the last rung | reasoning everywhere | mean cost per call: 143 (27B no-reasoning) vs 795 (27B reasoning) over the 11.7k calls of 195 bench runs on the real proxy | the cheap call plus a free check solves most tasks; reasoning is kept for what failed a check |
 | Cap on all reasoning calls: 15 % of a known budget (else 15k) | no cap | — | a heavy set must not spend the budget on rescues |
 | Program as the artefact for computations: one assignment per quantity, no comments | free-text answer; commented code; "shortest program" | ~25 % fewer tokens than commented code; "shortest program" saved ~30 % but collapsed steps into a wrong loop on an example task | executable, checkable, keeps rounding steps |
 | Data: the harness loads and cleans the tables, the model writes one pandas expression | the model writes a full program | −47 % tokens at equal accuracy (A/B on the real proxy) | encoding, separators, "1,250", "$12.50", total rows handled once in code, not by the model |
