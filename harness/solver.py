@@ -46,12 +46,18 @@ _CLEAN = """def _clean(d):
                 num = conv(filled)
                 if num.notna().mean() >= 0.8:
                     d[c] = conv(s)
-    # a trailing summary row ("Total", "Grand total", "Итого") is not data
+    # a trailing summary row ("Total", "Grand total", "Итого") is not data - when its label says
+    # so AND one of its numbers is the sum of the rows above (a product named "Total" stays)
     if len(d) > 2:
         last = d.iloc[-1]
         if any(isinstance(v, str) and _re.fullmatch(r"\\s*(grand\\s+)?totals?\\s*:?\\s*|\\s*итого\\s*:?\\s*", v, _re.I)
                for v in last.values):
-            d = d.iloc[:-1].copy()
+            body = d.iloc[:-1]
+            for c in d.columns:
+                if pd.api.types.is_numeric_dtype(d[c]) and pd.notna(last[c]) and \
+                        abs(float(body[c].sum()) - float(last[c])) <= 1e-6 * max(1.0, abs(float(last[c]))):
+                    d = body.copy()
+                    break
     return d
 """
 

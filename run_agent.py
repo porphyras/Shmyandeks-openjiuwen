@@ -141,7 +141,10 @@ class Run:
         model = ladder[min(level, len(ladder) - 1)]
         reasoning = not model.endswith("noreason")
         if reasoning:
-            max_tokens = max(max_tokens, REASONING_MAX_TOKENS)
+            # Code fixes need room: across the bench runs 24 of 97 reasoning retries of code
+            # fixes thought until a 1500 cut and returned nothing (64 of the others fixed the
+            # task). Only failed fixes ever reach this rung.
+            max_tokens = max(max_tokens, REASONING_MAX_TOKENS * (2 if task.kind == "coding" else 1))
         rem = self.llm.remaining()
         if rem is not None:
             est = sum(len(str(m.get("content", ""))) for m in messages) / 33.0 + min(max_tokens, 300) * 0.4
