@@ -108,9 +108,9 @@ class Run:
         self.workers = max(1, min(5, args.workers or int(env_float("HARNESS_WORKERS", 5))))
         self.infeasible_answer = os.environ.get("HARNESS_INFEASIBLE_ANSWER", "")
         self.second_pass = os.environ.get("HARNESS_SECOND_PASS", "1") == "1"
-        # Kinds whose failed checks get one more try on the reasoning model. On the hard bench set
-        # this rescued 3 of 4 failed code fixes (~700 units per call) and none of the others.
-        self.retry_kinds = set(k for k in os.environ.get("HARNESS_RETRY_FAILED", "coding").split(",") if k)
+        # Kinds whose failed checks get one more try on the reasoning model: code fixes (rescued
+        # 3 of 4 on the hard set) and data programs that crashed twice (rare, but then a sure loss).
+        self.retry_kinds = set(k for k in os.environ.get("HARNESS_RETRY_FAILED", "coding,data").split(",") if k)
         # Kinds whose answers get an independent second opinion even in a full run.
         self.crosscheck_kinds = set(k for k in os.environ.get("HARNESS_CROSSCHECK", "").split(",") if k)
         # Computations whose program needed control flow get a second opinion (gated) - on
