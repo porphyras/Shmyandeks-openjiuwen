@@ -324,7 +324,8 @@ def _norm(s):
 def kb_docs(task):
     docs = []
     for p in list_files(task.cwd, limit=10000):
-        if os.path.splitext(p)[1].lower() in (".md", ".txt", ".json", ".yaml", ".yml", ".csv", ""):
+        if os.path.splitext(p)[1].lower() in (".md", ".markdown", ".rst", ".txt", ".adoc", ".org", ".json", ".yaml",
+                                              ".yml", ".csv", ".tsv", ".html", ".htm", ".xml", ".ini", ".cfg", ""):
             docs.append((os.path.relpath(p, task.cwd), read_text(p, 65536).strip()))
     return docs
 
@@ -441,7 +442,7 @@ def kb_context(task, full_limit=600, max_docs=12):
     docs = kb_docs(task)
     problems = []
     if not docs:
-        return "", ["no knowledge base files"], 0
+        return "", ["no knowledge base files"], (0, False, True)
     total = sum(len(t) for _, t in docs)
     instr = task.short_instruction()
     ents = [_norm(e) for e in _entities(instr)]

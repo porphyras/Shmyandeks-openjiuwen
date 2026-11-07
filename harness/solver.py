@@ -140,8 +140,10 @@ class Solver:
 
     def prepare(self, task):
         """LLM-free inspection. Returns dict with context and feasibility problems."""
-        info = {"problems": [], "ctx": "", "ctx_chars": 0}
         t = task.type
+        # the declared type is the fallback kind if the inspection below fails
+        info = {"problems": [], "ctx": "", "ctx_chars": 0,
+                "kind": {"data_analysis": "data"}.get(t, t if t in ("math", "search", "coding") else "math")}
         try:
             if t == "data_analysis" or (t not in ("math", "search", "coding") and task.workspace and
                                          any(ctx.is_table(p) for p in ctx.list_files(task.cwd, 50))):
