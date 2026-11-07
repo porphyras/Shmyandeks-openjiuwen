@@ -10,8 +10,9 @@ def atomic_write(path, text):
     d = os.path.dirname(path) or "."
     tmp = os.path.join(d, ".%s.%d.%d.tmp" % (os.path.basename(path), os.getpid(), threading.get_ident()))
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(text)
+        data = text.encode("utf-8", "replace") if isinstance(text, str) else bytes(text)
+        with open(tmp, "wb") as f:
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         try:
@@ -20,7 +21,7 @@ def atomic_write(path, text):
             pass
         os.replace(tmp, path)
         return True
-    except OSError:
+    except Exception:
         try:
             os.unlink(tmp)
         except OSError:
@@ -28,12 +29,22 @@ def atomic_write(path, text):
         return False
 
 
+def atomic_write_bytes(path, data):
+    return atomic_write(path, data)
+
+
+MAX_ANSWER = 1000
+
+
 def write_answer(task_dir, answer):
-    """answer.txt goes to the task dir and, if present, to workspace/ (the task's cwd)."""
-    text = str(answer).strip() + "\n"
-    ok = atomic_write(os.path.join(task_dir, "answer.txt"), text)
+    """answer.txt goes to the task dir and, if present, to workspace/ (the task's cwd).
+    Returns True if at least one copy was written."""
+    text = str(answer).strip()[:MAX_ANSWER] + "\n"
+    ok = False
+    if not os.path.islink(task_dir):
+        ok = atomic_write(os.path.join(task_dir, "answer.txt"), text)
     ws = os.path.join(task_dir, "workspace")
-    if os.path.isdir(ws):
+    if os.path.isdir(ws) and not os.path.islink(ws):
         ok = atomic_write(os.path.join(ws, "answer.txt"), text) or ok
     return ok
 

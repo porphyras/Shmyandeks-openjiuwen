@@ -76,14 +76,34 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
 ## Infeasible tasks
 
 Detected without spending tokens where possible:
-- data: a quoted value of the question does not occur in any column, or announced columns are
-  missing;
-- knowledge base: an entity of the question is not mentioned anywhere;
-- code: no tests / no source to fix.
+- data: a quoted value right after a column name ("product 'gizmo'") does not occur in that
+  column, or announced columns are missing from the file;
+- knowledge base: an entity of the question is not mentioned anywhere in the base;
+- code: the tests contradict each other — a static check over the test file collects every
+  `assertEqual(call, literal)`, flags the same call required to equal two different values,
+  and evaluates the remaining assertions about those calls (`len(...)`, comparisons,
+  `assertTrue/False`, `assertIn`, ...) with the required values substituted; tests importing
+  a module that exists neither in the standard library nor in the workspace;
+- programs: a model-written program that divides by zero (split into 0 parts, empty selection).
 
 Otherwise the model may answer `IMPOSSIBLE` / `NOT FOUND`, which stops work on the task
-(no retries). Infeasible tasks get no `answer.txt` (configurable with
-`HARNESS_INFEASIBLE_ANSWER`).
+(no retries). Code fixes that still fail after two attempts are not escalated further.
+Infeasible tasks get no `answer.txt` (configurable with `HARNESS_INFEASIBLE_ANSWER`).
+
+## Robustness
+
+- Broken or hostile task files never stop the run: every task is loaded and inspected in
+  isolation; non-regular files (FIFOs, devices) and symlinks leading out of the task are
+  ignored; prompt sizes are capped; inspection has a global deadline after which remaining
+  tasks are inspected lazily.
+- Programs written by the model run with a clean environment (no `LLM_*`), in their own
+  process group, with a timeout, memory and file-size limits; their output goes to capped temp
+  files. The proxy key is not even in the harness's own process environment (the harness
+  re-executes itself and receives the key through a pipe), and it is redacted from all output.
+- Test files and fixed sources are snapshotted before any model call and restored if anything
+  changes them; all answers are rewritten from memory at the end of the run.
+- Proxy errors: rate limiting (429) is waited out; key/quota refusals or a proxy that stops
+  answering end the run cleanly; transient errors are retried a bounded number of times.
 
 ## Bench and trajectories
 

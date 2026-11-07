@@ -12,3 +12,4 @@ bench/sets/
 bench/runs/
 bench/key_usage.jsonl
 requirements.in
+logs/

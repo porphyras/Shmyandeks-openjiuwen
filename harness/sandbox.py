@@ -1,8 +1,15 @@
-"""Run model-written code inside a task directory: clean env, timeout, capped output."""
+"""Run model-written code inside a task directory: clean env, timeout, capped output.
+
+Output goes to size-limited temp files (not pipes): a flooding program cannot fill the
+harness memory, and a daemonised grandchild cannot keep us waiting on an open pipe.
+"""
 import os
 import signal
+import sys
 import subprocess
 import tempfile
+import threading
+import time
 
 SAFE_ENV = {
     "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -16,50 +23,98 @@ SAFE_ENV = {
     "MPLCONFIGDIR": "/tmp/mpl",
 }
 MAX_OUT = 64 * 1024
+FILE_LIMIT = 32 << 20  # RLIMIT_FSIZE: also caps the captured output files
+
+# Session ids of the sandboxed process groups we started (used to ignore signals they send).
+CHILD_SIDS = set()
+_LOCK = threading.Lock()
+_TMP = "/tmp" if os.path.isdir("/tmp") else None
+# Model programs and tests run on the harness's own interpreter (in the image it is the
+# image's python3 with pandas/numpy; on a dev machine the venv's).
+PYTHON = sys.executable or "python3"
 
 
 def _limits():
     try:
+        # The harness blocks SIGTERM/SIGINT in all its threads (they are read with
+        # sigwaitinfo); children must start with a normal signal mask.
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT})
+    except Exception:
+        pass
+    try:
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (2 << 30, 2 << 30))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (64 << 20, 64 << 20))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (FILE_LIMIT, FILE_LIMIT))
     except Exception:
         pass
 
 
-def run(argv, cwd, timeout=20, stdin_text=None):
+def _read_head(f):
+    f.seek(0)
+    return f.read(MAX_OUT).decode("utf-8", "replace")
+
+
+def run(argv, cwd, timeout=20):
     """Returns (returncode, stdout, stderr); returncode None on timeout."""
     env = dict(SAFE_ENV)
-    if os.path.isdir("/usr/local/bin") is False:
+    if not os.path.isdir("/usr/local/bin"):
         env["PATH"] = os.environ.get("PATH", env["PATH"])
     try:
-        p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-                             preexec_fn=_limits if os.name == "posix" else None)
+        fo = tempfile.TemporaryFile(dir=_TMP)
+        fe = tempfile.TemporaryFile(dir=_TMP)
     except OSError as e:
         return -1, "", str(e)
     try:
-        out, err = p.communicate(stdin_text.encode() if stdin_text is not None else None, timeout=timeout)
-        rc = p.returncode
-    except subprocess.TimeoutExpired:
+        try:
+            p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
+                                 start_new_session=True, close_fds=True,
+                                 preexec_fn=_limits if os.name == "posix" else None)
+        except OSError as e:
+            return -1, "", str(e)
+        with _LOCK:
+            CHILD_SIDS.add(p.pid)
+        rc = None
+        try:
+            rc = p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            rc = None
+        # Kill the whole group either way: leftovers must not outlive the call.
         try:
             os.killpg(p.pid, signal.SIGKILL)
         except OSError:
             pass
-        out, err = p.communicate()
-        rc = None
-    return rc, out[:MAX_OUT].decode("utf-8", "replace"), err[:MAX_OUT].decode("utf-8", "replace")
+        if rc is None:
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        return rc, _read_head(fo), _read_head(fe)
+    finally:
+        fo.close()
+        fe.close()
 
 
 def run_python_code(code, cwd, timeout=20):
     """Script file lives in /tmp so the task directory is not polluted."""
-    fd, path = tempfile.mkstemp(prefix="s_", suffix=".py", dir="/tmp" if os.path.isdir("/tmp") else None)
+    fd, path = tempfile.mkstemp(prefix="s_", suffix=".py", dir=_TMP)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(code)
-        return run(["python3", "-I", path], cwd, timeout)
+        return run([PYTHON, "-I", path], cwd, timeout)
     finally:
         try:
             os.unlink(path)
         except OSError:
             pass
+
+
+def is_sandbox_sender(pid):
+    """True if `pid` belongs to one of the sandboxed sessions (a program we ran)."""
+    if not pid:
+        return False
+    try:
+        sid = os.getsid(pid)
+    except OSError:
+        return False
+    with _LOCK:
+        return sid in CHILD_SIDS
