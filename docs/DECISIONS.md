@@ -97,14 +97,16 @@ Stability (three runs of one version, tasks solved in every run): train_b 80/80,
 adv 26/30, hard 90/100. The blinking tasks are MuSiQue questions with distractors and a few
 olympiad-style math problems.
 
-Independent hold-out sets, built separately from other sources and never used for tuning
-(aggregates only):
+Two hold-out sets were built independently from other sources. Only aggregate scores and,
+on a few occasions, generic failure categories ("program crashed", "declared infeasible", "cut
+at the token limit") were fed back — never task texts or answers. Part of the early progress on
+set A came from fixing the categories reported for it.
 
-| Hold-out | Versions | Result |
+| Hold-out | Versions | Result (feasible reward solved) |
 |---|---|---|
-| hold-out 1 (60 tasks) | successive versions on 07.11 | 77 % → 85 % → 90 % → 98 % of feasible tasks |
-| hold-out 2 (reward 142) | stable 07.11 ×3 / stable 08.11 ×2 / current ×1 | 129–141 / 136–138 / 136 |
-| hold-out 3 (reward 140) | stable 07.11 / stable 08.11 ×2 / current ×1 | 125 / 133–135 / 130 |
+| A — 60 tasks, reward 142 | successive versions on 07.11 | 77 % → 85 % → 90 % → 98 % of feasible tasks |
+| | stable 07.11 ×3 / stable 08.11 ×2 / current ×1 | 129–141 / 136–138 / 136 of 142 |
+| B — 64 tasks, reward 140 | stable 07.11 ×3 / stable 08.11 ×2 / current ×1 | 125 / 133–135 / 130 of 140 |
 
 Latest changes (08.11) on the tasks they target: card-base search cut-offs +2 (adv), third look
 at large prose bases +3 (var2; 8 such tasks 16/16), method placement +1 (var2 code; 5/5 with

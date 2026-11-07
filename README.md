@@ -278,8 +278,10 @@ Results on the real proxy (organisers' units; feasible reward solved / available
 | hard | 116 (16) | GSM-Hard/GSM8K, MBPP with bugs, MuSiQue 2–4 hops, DABench | 92–93 % | ~30–40k |
 | math2 | 68 (8) | MATH-500 level 5, GSM8K, SVAMP, ASDiv | 94–96 % | ~25k |
 
-A blind hold-out set of 60 tasks built by a separate reviewer from other sources was run
-on intermediate versions: 77 % → 85 % → 90 % → 98 % of feasible tasks solved. On sets in the
+A hold-out set of 60 tasks built by a separate reviewer from other sources was run on
+intermediate versions: 77 % → 85 % → 90 % → 98 % of feasible tasks solved (only aggregate
+scores and generic failure categories were fed back, never task texts or answers; see
+`docs/DECISIONS.md` for both hold-out sets). On sets in the
 format of the examples a run of 100 tasks takes about a minute with 5 sessions and costs
 about 100 units per task, infeasible ones included.
 
