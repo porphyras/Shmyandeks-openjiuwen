@@ -58,6 +58,12 @@ _CLEAN = """def _clean(d):
                         abs(float(body[c].sum()) - float(last[c])) <= 1e-6 * max(1.0, abs(float(last[c]))):
                     d = body.copy()
                     break
+    # the same columns under snake_case names too ("Order ID" -> order_id): task texts often
+    # name columns that way while the file header uses spaces/capitals
+    for c in list(d.columns):
+        alias = _re.sub(r"[^0-9a-zA-Z]+", "_", str(c)).strip("_").lower()
+        if alias and alias != c and alias not in d.columns:
+            d[alias] = d[c]
     return d
 """
 
@@ -389,8 +395,16 @@ class Solver:
         excerpt = info.get("ctx") or ""
         corpus_all = None
         guess = ""
-        for attempt in range(3):
-            if not info.get("kb_cards", True):
+        chain_retry = False
+        for attempt in range(4):
+            if chain_retry is True:
+                # The previous one-line request was answered with an explanation that hit the
+                # token limit before any ANSWER line: let it finish the chain this time.
+                tail = ("Reply with the chain of facts in a few words (names may be aliases, nicknames or "
+                        "written surname first), then ANSWER: <value> (or NOT FOUND).")
+                mt = 260
+                chain_retry = "done"
+            elif not info.get("kb_cards", True):
                 tail = ("Reply with the chain of facts in a few words (names may be aliases or nicknames), "
                         "then ANSWER: <value> (or NOT FOUND).")
                 mt = 260
@@ -404,6 +418,8 @@ class Solver:
             msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
             reply = self.ask(task, msgs, level, mt)
             raw = _raw_answer(reply)
+            unfinished = (not raw and "ANSWER:" not in (reply or "").upper() and not says_impossible(reply)
+                          and len((reply or "").strip()) > 40)
             if says_impossible(reply) or says_impossible(raw) or raw.upper() in ("UNKNOWN", "NONE", "N/A"):
                 raw = ""
             span = _kb_span(raw, excerpt)
@@ -420,9 +436,14 @@ class Solver:
                 if len(corpus_all) > len(excerpt) + 10:
                     excerpt = corpus_all
                     continue
-                if not self.careful:
-                    break
-            if attempt <= 1 and self.careful and level < 2:
+            if unfinished and chain_retry is False and mt < 260:
+                # (on prose bases the chain was already allowed 260 tokens: across the bench a cut
+                # there was a missing fact, and a longer retry only cost ~600 more)
+                chain_retry = True
+                continue
+            if attempt == 0 and not self.careful:
+                break
+            if attempt <= 2 and self.careful and level < 2:
                 level = 2  # qualification: the tasks are solvable, ask the reasoning model too
                 continue
             break
