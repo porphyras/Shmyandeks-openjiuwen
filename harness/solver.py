@@ -25,6 +25,9 @@ CODING_TESTSRC = os.environ.get("HARNESS_CODING_TESTSRC", "0") == "1"
 CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S)
 
 
+# Expressions often use np.floor / math.floor without importing them.
+_IMPORTS = "import math\nimport numpy as np\nimport pandas as pd\n"
+
 # Text columns that are numbers in disguise ("1,250", "$12.50", " 7 ") become numbers; the
 # model is told so. Only columns where nearly every non-empty value parses are touched.
 _CLEAN = """def _clean(d):
@@ -281,7 +284,7 @@ class Solver:
         if DATA_EXPR and len(tables) == 1:
             rel = os.path.relpath(tables[0], task.cwd)
             load = ctx.pandas_load(tables[0], rel)
-            prelude = "import pandas as pd\n" + _CLEAN + "df = _clean(%s)\n" % load
+            prelude = _IMPORTS + _CLEAN + "df = _clean(%s)\n" % load
             body += ("\ndf = %s is loaded. Reply in a ```python block with one pandas expression "
                      "over df whose value is the answer." % load)
         elif DATA_EXPR and 2 <= len(tables) <= 6:
@@ -289,13 +292,13 @@ class Solver:
             for tp in tables:
                 rel = os.path.relpath(tp, task.cwd)
                 var = re.sub(r"\W+", "_", os.path.splitext(os.path.basename(tp))[0]).strip("_").lower() or "t"
-                if var[0].isdigit() or keyword.iskeyword(var) or hasattr(builtins, var) or var in ("pd", "df"):
+                if var[0].isdigit() or keyword.iskeyword(var) or hasattr(builtins, var) or var in ("pd", "df", "np", "math"):
                     var = "t_" + var
                 while var in names:
                     var += "_"
                 names.add(var)
                 loads.append("%s = %s" % (var, ctx.pandas_load(tp, rel)))
-            prelude = "import pandas as pd\n" + _CLEAN + "\n".join(
+            prelude = _IMPORTS + _CLEAN + "\n".join(
                 "%s = _clean(%s)" % tuple(l.split(" = ", 1)) for l in loads) + "\n"
             body += ("\nLoaded with pandas: %s. Reply in a ```python block with a short pandas program using them "
                      "(no comments) that prints only the answer." % "; ".join(loads))
