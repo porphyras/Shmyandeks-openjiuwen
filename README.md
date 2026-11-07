@@ -26,8 +26,10 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   `./logs/` on import) is switched to console-only before any other openJiuwen import;
   byte-code writing is disabled; temporary scripts go to `/tmp`.
 - Arguments are parsed leniently: `--tasks-dir` (or env `TASKS`, default `/data/tasks`),
-  optional `--out/--output` (or env `OUT`), optional `--budget` (or env `TOKEN_BUDGET`);
-  unknown arguments are ignored.
+  optional `--out/--output` (or env `OUT`), the token budget from `--budget`, env `BUDGET`
+  (how the organisers pass it, e.g. `BUDGET=100000`) or env `TOKEN_BUDGET`, in that order;
+  unknown arguments are ignored. The proxy does not report the remainder: the harness counts
+  every call the organisers' way and stays within the budget.
 
 ### Output
 
@@ -160,7 +162,7 @@ lower the planner's success estimate: the model looks once and may answer `IMPOS
 - The image contains only the harness (`run_agent.py`, `harness/`) and pinned packages; the
   bench is excluded by `.dockerignore`. Nothing is downloaded at run time; the only network
   peer is `LLM_BASE_URL`, reached through the openJiuwen client.
-- Environment read: `LLM_BASE_URL`, `LLM_API_KEY`, `TASKS`, `OUT`, optional `TOKEN_BUDGET` and
+- Environment read: `LLM_BASE_URL`, `LLM_API_KEY`, `TASKS`, `OUT`, `BUDGET`, optional `TOKEN_BUDGET` and
   `HARNESS_*` tuning switches. Files touched: the task directory tree and `/tmp`.
 - Task files are untrusted data. Programs the model writes run in a separate process session,
   with an environment that has no `LLM_*` variables, a timeout, memory and file-size limits,
