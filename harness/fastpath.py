@@ -132,6 +132,13 @@ def solve_data(task):
         m = rx.fullmatch(sents[1])
         if not m:
             continue
+        # A quoted value that also occurs in another spelling (case, spaces) is ambiguous.
+        quoted = set(re.findall(r"'([^']+)'", sents[1]))
+        for col in ("product", "region"):
+            vals = {r[col] for r in rows}
+            for q in quoted:
+                if any(v != q and v.strip().lower() == q.strip().lower() for v in vals):
+                    return None
         sel = [r for r in rows if keep(r, *m.groups())]
         if not sel:
             return None  # nothing matches (absent value or period): the model decides
@@ -168,7 +175,10 @@ def _cards(task):
             m = re.fullmatch(r"([A-Z][\w ]{0,30}):\s*(.+)", l)
             if not m:
                 return None  # prose or anything unusual: not a pure card base
-            fields[m.group(1).strip()] = m.group(2).strip()
+            key = m.group(1).strip()
+            if key in fields:
+                return None  # the same field twice: ambiguous
+            fields[key] = m.group(2).strip()
         title = lines[0][2:].strip().lower()
         if title in cards:
             return None  # two cards with one name: ambiguous
@@ -194,6 +204,11 @@ def solve_search(task):
             if card is None or field not in card:
                 return None  # missing card or field: the model takes a look
             value = card[field]
+            if field in ("Born", "Founded"):
+                if not re.fullmatch(r"\d{4}", value):
+                    return None  # "12 March 1983", "1983 (Prague)": the model extracts the year
+            elif not re.fullmatch(r"[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*", value):
+                return None  # punctuation, brackets, "X in Y": not a plain name
             cur = value.lower()
         return ("solved", value)
     return None

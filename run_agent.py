@@ -341,9 +341,21 @@ class Run:
             # checks twice was ever rescued by the reasoning rung, while infeasible ones burned
             # thousands of tokens there.
             if t.name in self.fast_answers:
-                trace({"ev": "fast_confirm", "task": t.name, "fast": self.fast_answers[t.name][1],
-                       "model": out.answer, "agree": out.answer == self.fast_answers[t.name][1]})
-                return  # the deterministic answer is already written
+                fast_ans = self.fast_answers[t.name][1]
+                agree = out.answer == fast_ans
+                trace({"ev": "fast_confirm", "task": t.name, "fast": fast_ans, "model": out.answer, "agree": agree})
+                if agree or out.status != "solved":
+                    return  # the deterministic answer is already written
+                # Qualification and they disagree: a third opinion decides by majority.
+                try:
+                    o3 = self.solver.solve(t, info, 2)
+                except Exception:
+                    return
+                third = o3.answer if o3.status == "solved" else None
+                if third == out.answer:
+                    self.finish_task(t, out)
+                trace({"ev": "fast_third", "task": t.name, "third": third})
+                return
             if level == 0 and (out.status == "error" or (out.status == "failed" and t.kind in self.retry_kinds)):
                 with hlock:
                     retry.append(t)
