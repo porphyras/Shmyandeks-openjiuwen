@@ -67,7 +67,7 @@ python3 bench/gen_tasks.py --out bench/sets/NAME --n 200 --seed 1 --infeasible 0
 python3 bench/import_examples.py --src data/examples/task-dir --out bench/sets/examples
 python3 bench/grade.py --set bench/sets/NAME --run RUN_DIR [--stats stats.json] [--json out.json] [-v]
 python3 bench/oracle_fill.py --set bench/sets/NAME --run RUN_DIR [--fresh] \
-    [--mode oracle|hack|wrong|none] [--where task|workspace|both] [--infeasible-answer TEXT]
+    [--mode oracle|overfit|wrong|none] [--where task|workspace|both] [--infeasible-answer TEXT]
 ```
 
 `RUN_DIR` — папка с каталогами задач после прогона (`RUN_DIR/<task_id>`, допускается и `RUN_DIR/tasks/<task_id>`).
@@ -88,6 +88,6 @@ python3 bench/oracle_fill.py --set bench/sets/NAME --run RUN_DIR [--fresh] \
 | `oracle` | 479/479 (100 %) |
 | `none` | 0 |
 | `wrong` | 0 |
-| `hack` | coding 0/40, у всех 40 пометка overfit |
-| изменён тест | помечено CHEAT |
+| `overfit` (negative control) | coding 0/40, у всех 40 пометка overfit |
+| изменён тест | помечено TESTS MODIFIED |
 | ответ `N.0` | засчитан с предупреждением |

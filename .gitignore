@@ -10,5 +10,5 @@ runs/
 research/
 bench/sets/
 bench/runs/
-bench/key_usage.jsonl
+bench/proxy_probe.jsonl
 logs/

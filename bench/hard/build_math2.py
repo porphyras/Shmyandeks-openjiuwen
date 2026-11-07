@@ -369,6 +369,7 @@ def tex_to_text(s):
     """MATH problem text -> plain text. ValueError if the problem needs LaTeX to be understood."""
     if REJECT_TEX.search(s):
         raise ValueError("rejected notation")
+    # "\x00" is a temporary placeholder for an escaped dollar; no NUL reaches the output
     s = s.replace("\\$", "\x00").replace("``", '"').replace("''", '"')
     # ordinal superscripts: 100^{\mathrm{th}} -> 100th
     s = re.sub(r"\^\{\s*(?:\\(?:mathrm|text|textrm|rm)\s*)?\{?\s*(th|st|nd|rd)\s*\}?\s*\}", r"\1", s)
