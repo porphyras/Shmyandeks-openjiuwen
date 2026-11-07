@@ -18,7 +18,11 @@ for tid, k in keys.items():
     if k.get("check") == "unittest":
         h = os.path.join(out, "hidden", tid)
         os.makedirs(h)
-        shutil.copy(os.path.join(d, "workspace", "test_mylib.py"), os.path.join(h, "test_hidden.py"))
+        src_hidden = os.path.join(src, "hidden", tid, "test_hidden.py")
+        if os.path.isfile(src_hidden):
+            shutil.copy(src_hidden, os.path.join(h, "test_hidden.py"))
+        elif os.path.isfile(os.path.join(d, "workspace", "test_mylib.py")):
+            shutil.copy(os.path.join(d, "workspace", "test_mylib.py"), os.path.join(h, "test_hidden.py"))
     k.setdefault("kind", k.get("infeasible_reason") or "alt")
 json.dump(keys, open(os.path.join(out, "keys.json"), "w"), indent=1)
 print(len(keys), "tasks imported")

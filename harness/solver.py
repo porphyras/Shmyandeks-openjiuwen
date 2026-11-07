@@ -101,13 +101,13 @@ class Solver:
         t = task.type
         try:
             if t == "data_analysis" or (t not in ("math", "search", "coding") and task.workspace and
-                                         any(p.endswith(".csv") for p in ctx.list_files(task.cwd, 50))):
+                                         any(ctx.is_table(p) for p in ctx.list_files(task.cwd, 50))):
                 info["ctx"], info["problems"] = ctx.data_context(task)
                 info["kind"] = "data"
             elif t == "search" or (task.workspace and os.path.isdir(os.path.join(task.cwd, "kb"))):
                 info["ctx"], info["problems"], (info["ndocs"], info["kb_complete"]) = ctx.kb_context(task)
                 info["kind"] = "search"
-            elif t == "coding" or (task.workspace and ctx.find_tests(task.cwd)):
+            elif t == "coding" or (task.workspace and ctx.find_tests(task.cwd, task.instruction)):
                 info["kind"] = "coding"
                 self._prepare_coding(task, info)
             else:
@@ -151,8 +151,8 @@ class Solver:
         return ok, "\n".join(outs)
 
     def _prepare_coding(self, task, info):
-        tests = ctx.find_tests(task.cwd)
-        srcs = ctx.source_files(task.cwd)
+        tests = ctx.find_tests(task.cwd, task.instruction)
+        srcs = ctx.source_files(task.cwd, task.instruction)
         info["tests"] = tests
         info["srcs"] = srcs
         info["src_orig"] = {p: ctx.read_text(p, 1 << 20) for p in srcs[:5]}
@@ -174,6 +174,7 @@ class Solver:
             tsrc = ctx.read_text(tp, 1 << 20)
             info["problems"] += ctx.test_contradictions(tsrc)
             info["problems"] += ["test imports missing module %s" % m for m in ctx.missing_imports(tsrc, task.cwd)]
+            info["problems"] += ctx.missing_fixtures(tsrc, os.path.dirname(tp))
         if info["problems"]:
             return
         ok, out = self._run_tests(task, tests)
@@ -228,13 +229,14 @@ class Solver:
         body = instr
         if data:
             body += "\nFiles in the working directory:\n" + data
-        csvs = [p for p in ctx.list_files(task.cwd, 50) if p.lower().endswith(".csv")] if data else []
+        tables = [p for p in ctx.list_files(task.cwd, 50) if ctx.is_table(p)] if data else []
         prelude = ""
-        if DATA_EXPR and len(csvs) == 1:
-            rel = os.path.relpath(csvs[0], task.cwd)
-            prelude = "import pandas as pd\ndf = pd.read_csv(%r)\n" % rel
-            body += ("\ndf = pd.read_csv(%r) is loaded. Reply in a ```python block with one pandas expression "
-                     "over df whose value is the answer." % rel)
+        if DATA_EXPR and len(tables) == 1:
+            rel = os.path.relpath(tables[0], task.cwd)
+            load = "pd.read_csv(%r%s)" % (rel, ", sep='\\t'" if ctx.table_sep(tables[0]) == "\t" else "")
+            prelude = "import pandas as pd\ndf = %s\n" % load
+            body += ("\ndf = %s is loaded. Reply in a ```python block with one pandas expression "
+                     "over df whose value is the answer." % load)
         else:
             if NO_COMMENTS:
                 body += ("\nReply with a python3 program in a ```python block: one assignment per quantity the task "
@@ -272,8 +274,12 @@ class Solver:
             if prelude:
                 code = prelude + (code if "print(" in code else
                                   "_r = (%s)\n%s" % (code.strip(), _PRINT_SCALAR))
+            ans_path = os.path.join(task.cwd, "answer.txt")
+            before = _mtime(ans_path)
             rc, out, err = sandbox.run_python_code(code, task.cwd, timeout=30)
             ans = normalize_answer(last_line(out))
+            if rc == 0 and not ans and _mtime(ans_path) != before:
+                ans = normalize_answer(ctx.read_text(ans_path, 2000))  # it wrote the file instead of printing
             if rc == 0 and says_impossible(ans):
                 if "except" in model_code and not attempt:
                     # A refusal printed from an exception handler is often the program's own bug.
@@ -338,8 +344,9 @@ class Solver:
         if info.get("initial_pass"):
             return Outcome("solved", "DONE" if task.wants_done else "DONE", "tests already pass")
         target = srcs[0] if len(srcs) == 1 else self._guess_target(srcs, tests)
-        original = ctx.read_text(target, 1 << 20)
-        current = original
+        files = [target] + [p for p in srcs[:3] if p != target]
+        original = {p: ctx.read_text(p, 1 << 20) for p in files}
+        current = dict(original)
         instr = task.short_instruction()
         out = info.get("test_out", "")
         for attempt in range(2):
@@ -353,36 +360,47 @@ class Solver:
                 if says_impossible(reply):
                     break
                 continue
-            merged = merge_functions(current, code)
-            if merged is None:
+            # Each changed definition goes to the file that defines it; new ones to the target.
+            merged = {}
+            elsewhere = set()
+            for p in files[1:]:
+                elsewhere |= _defined_names(current[p])
+            for p in files:
+                m = merge_functions(current[p], code, add_new=(p == target),
+                                    skip_new=elsewhere if p == target else ())
+                if m is not None and m != current[p]:
+                    merged[p] = m
+            if not merged:
                 continue
-            if not _write(target, merged):
+            if not all(_write(p, m) for p, m in merged.items()):
                 return Outcome("error", note="cannot write source")
             ok, out = self._run_tests(task, tests)
             if self._tests_tampered(info):
                 # Restored; run once more to tell our patch from a concurrent outside change.
                 ok, out = self._run_tests(task, tests)
                 if self._tests_tampered(info):
-                    _write(target, current)
+                    for p in merged:
+                        _write(p, current[p])
                     return Outcome("failed", note="tests modified")
+            current.update(merged)
             if ok:
-                info["final_src"] = (target, merged)
+                info["final_src"] = [(p, current[p]) for p in files if current[p] != original[p]]
                 return Outcome("solved", "DONE")
-            current = merged
         # Leave the best-known version in place: keep the patch only if it fails fewer tests.
         if current != original:
             n_now = len(ctx.failing_test_names(out))
             n_orig = len(ctx.failing_test_names(info.get("test_out", "")))
             if n_now > n_orig:
-                _write(target, original)
+                for p in files:
+                    _write(p, original[p])
         return Outcome("failed", note="tests still failing")
 
     def protect(self, info):
         """Undo later changes (by other programs) to a coding task's tests and fixed source."""
         self._tests_tampered(info)
-        fs = info.get("final_src")
-        if fs and ctx.read_text(fs[0], 1 << 20) != fs[1]:
-            _write(fs[0], fs[1])
+        for path, text in info.get("final_src") or []:
+            if ctx.read_text(path, 1 << 20) != text:
+                _write(path, text)
 
     def _tests_tampered(self, info):
         """Detects and undoes any change to the test files."""
@@ -410,12 +428,34 @@ class Solver:
         return srcs[0]
 
 
+def _defined_names(src):
+    """Top-level functions/classes and class methods defined in a source file."""
+    try:
+        body = ast.parse(src).body
+    except SyntaxError:
+        return set()
+    names = set()
+    for n in body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(n.name)
+        if isinstance(n, ast.ClassDef):
+            names |= {b.name for b in n.body if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    return names
+
+
+def _mtime(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
 def _write(path, text):
     from .io_utils import atomic_write
     return atomic_write(path, text)
 
 
-def merge_functions(original, patch):
+def merge_functions(original, patch, add_new=True, skip_new=()):
     """Replace top-level defs/classes of `original` by same-named ones from `patch`
     (classes are merged method by method); new definitions and imports are added.
     Returns None if the patch does not parse or defines nothing."""
@@ -428,7 +468,7 @@ def merge_functions(original, patch):
     try:
         otree = ast.parse(original)
     except SyntaxError:
-        return patch if patch.strip() else None
+        return (patch if patch.strip() else None) if add_new else None
     plines = patch.splitlines()
     olines = original.splitlines()
 
@@ -448,11 +488,34 @@ def merge_functions(original, patch):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             newdefs[node.name] = text
         elif isinstance(node, ast.ClassDef):
-            newclasses[node.name] = (node, text)
+            newclasses[node.name] = (node, text, plines)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             imports.append(text)
         elif assign_key(node) and not any(isinstance(x, (ast.Call, ast.Await, ast.Yield)) for x in ast.walk(node.value)):
             others.append((assign_key(node), text))
+    # Methods sent without their class ("def pop(self): ...") go back into the class that has them.
+    top_defs = {n.name for n in otree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    owner = {}
+    for n in otree.body:
+        if isinstance(n, ast.ClassDef):
+            for b in n.body:
+                if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    owner.setdefault(b.name, n.name)
+    reroute = {}
+    for node in ptree.body:
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in owner
+                and node.name not in top_defs and node.args.args and node.args.args[0].arg in ("self", "cls")):
+            reroute.setdefault(owner[node.name], []).append(newdefs.pop(node.name))
+    for cname, texts in reroute.items():
+        if cname in newclasses:
+            src = newclasses[cname][1].rstrip("\n") + "\n\n" + "\n".join(textwrap.indent(t, "    ") for t in texts)
+        else:
+            src = "class %s:\n" % cname + "\n".join(textwrap.indent(t, "    ") for t in texts)
+        try:
+            cnode = ast.parse(src).body[0]
+        except SyntaxError:
+            continue
+        newclasses[cname] = (cnode, src, src.splitlines())
     if not newdefs and not newclasses and not others:
         return None
     assigned = dict(others)
@@ -465,7 +528,7 @@ def merge_functions(original, patch):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and name in newdefs:
             repl, tag = newdefs[name], name
         elif isinstance(node, ast.ClassDef) and name in newclasses:
-            repl, tag = _merge_class(olines, node, plines, newclasses[name][0]), name
+            repl, tag = _merge_class(olines, node, newclasses[name][2], newclasses[name][0]), name
         elif key and key in assigned:
             repl, tag = assigned[key], key
         if repl is not None:
@@ -476,8 +539,11 @@ def merge_functions(original, patch):
     out.extend(olines[pos:])
     existing = set(l.strip() for l in olines)
     head = [i for i in imports if i.strip() not in existing]
-    tail = ([v for k, v in newdefs.items() if k not in used] + [t for k, (n, t) in newclasses.items() if k not in used]
-            + [v for k, v in others if k not in used])
+    tail = ([v for k, v in newdefs.items() if k not in used and k not in skip_new]
+            + [v[1] for k, v in newclasses.items() if k not in used and k not in skip_new]
+            + [v for k, v in others if k not in used]) if add_new else []
+    if not add_new and not used:
+        return original  # nothing of this file was touched
     ins = 0
     for node in otree.body:  # keep a module docstring and __future__ imports first
         if (isinstance(node, ast.Expr) and isinstance(getattr(node, "value", None), ast.Constant)

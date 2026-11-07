@@ -36,9 +36,11 @@ LADDERS = {
     "search": ["qwen3.8-27b-noreason", "qwen3.6-35b-a3b-noreason", "qwen3.8-27b"],
     "coding": ["qwen3.8-27b-noreason", "qwen3.6-35b-a3b-noreason", "qwen3.8-27b"],
 }
-# Prior success probability and expected output tokens of one attempt, by kind.
-PRIOR_P = {"math": 0.92, "data": 0.95, "search": 0.95, "coding": 0.95}
-EXP_OUT = {"math": 50, "data": 50, "search": 8, "coding": 70}
+# Prior success probability by kind, and the cost model: cost = a + b * context_chars (organisers'
+# units), least-squares fit over 270 solved bench tasks on the real proxy (bench/trajectories).
+PRIOR_P = {"math": 0.95, "data": 0.97, "search": 0.97, "coding": 0.97}
+COST_FIT = {"math": (70.4, 0.0932, 40), "data": (30.0, 0.06, 30), "search": (13.4, 0.0341, 15),
+            "coding": (-11.7, 0.1007, 60)}
 REASONING_MAX_TOKENS = 1500
 
 
@@ -99,6 +101,8 @@ class Run:
         self.infeasible_answer = os.environ.get("HARNESS_INFEASIBLE_ANSWER", "")
         self.second_pass = os.environ.get("HARNESS_SECOND_PASS", "1") == "1"
         self.retry_failed = os.environ.get("HARNESS_RETRY_FAILED", "0") == "1"
+        # Kinds whose answers get an independent second opinion even in a full run.
+        self.crosscheck_kinds = set(k for k in os.environ.get("HARNESS_CROSSCHECK", "").split(",") if k)
         self.llm = LLM(os.environ.get("LLM_BASE_URL", ""), api_key, budget=budget, log=trace)
         self.solver = Solver(self.ask)
         self.cost = {}
@@ -107,6 +111,7 @@ class Run:
         self.answers = {}   # task dir -> final answer (rewritten at the end of the run)
         self.infos = {}
         self.reserved = 0.0  # expected cost of tasks in flight (only matters with a known budget)
+        self.estimates = {}  # task dir name -> cost forecast made before any call, and the actual cost
         self.careful = False
 
     # ----------------------------------------------------------------- model calls
@@ -132,14 +137,14 @@ class Run:
 
     # ----------------------------------------------------------------- planning
     def estimate(self, task, info):
+        """(p_success, expected cost) before any call; logged next to the actual spend."""
         kind = info.get("kind", "math")
-        ctx_tokens = (info.get("ctx_chars", 0) + 120) / 3.3 + 25
-        one = ctx_tokens / 10.0 + EXP_OUT.get(kind, 60)
+        a, b, floor = COST_FIT.get(kind, (60.0, 0.1, 40))
+        cost = max(floor, a + b * info.get("ctx_chars", 0))
         p = PRIOR_P.get(kind, 0.6)
         if info.get("problems"):
             p *= 0.05
-        exp_cost = one * (1 + (1 - p))
-        return p, exp_cost
+        return p, cost
 
     # ----------------------------------------------------------------- run
     def prepare_all(self, tasks, deadline_s):
@@ -175,6 +180,11 @@ class Run:
                 trace({"ev": "write_failed", "task": task.name, "dir": task.dir})
             self.summary.record(task.id, ans)
         self.results[task.name] = outcome.status
+        est = self.estimates.get(task.name)
+        if est is not None:
+            est["actual"] = round(self.cost.get(task.name, 0.0), 1)
+            est["status"] = outcome.status
+            self.summary.record_estimates(self.estimates)
         trace({"ev": "task", "task": task.name, "kind": task.kind, "status": outcome.status, "answer": ans,
                "note": outcome.note, "cost": round(self.cost.get(task.name, 0.0), 1),
                "spent": round(self.llm.spent, 1)})
@@ -239,6 +249,8 @@ class Run:
                 continue
             p, c = self.estimate(t, info)
             info["p"], info["cost"] = p, c
+            self.estimates[t.name] = {"task_id": t.id, "kind": t.kind, "estimate": round(c, 1),
+                                      "p_success": round(p, 3), "ctx_chars": info.get("ctx_chars", 0)}
             if info.get("problems") and t.kind != "coding":
                 self.finish_task(t, self.precheck_outcome(t, info))
                 continue
@@ -246,6 +258,8 @@ class Run:
                 self.finish_task(t, Outcome("solved", "DONE", "tests already pass"))
                 continue
             heapq.heappush(heap, (-(t.reward * p / max(c, 1.0)), next(seq), 0, t))
+        self.summary.record_estimates(self.estimates)
+        trace({"ev": "estimates", "items": self.estimates})
         trace({"ev": "plan", "queued": len(heap), "inspected": len(infos),
                "est_total": round(sum(infos[x[3].name]["cost"] for x in heap if x[3].name in infos), 1)})
 
@@ -286,7 +300,7 @@ class Run:
                 with hlock:
                     retry.append(t)
             self.finish_task(t, out)
-            if self.careful and out.status == "solved" and t.kind != "coding":
+            if out.status == "solved" and t.kind != "coding" and (self.careful or t.kind in self.crosscheck_kinds):
                 try:
                     out2 = self.solver.crosscheck(t, info, out)
                 except BudgetExhausted:

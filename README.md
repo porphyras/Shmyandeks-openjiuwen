@@ -142,6 +142,11 @@ real proxy (four sets, 2 generators):
 | search | yes | 88 | 36 | 37 | 41 | 1.00 |
 | search | no | 14 | 28 | 27 | 35 | 1.00 |
 
+Before any call the harness writes its forecast for every task (`estimate`, `p_success`,
+`ctx_chars`) and, after each task, the actual spend, to `token_estimates.json` next to the
+solutions file in `$OUT` (and to the trace). The forecast is a per-kind linear model
+`cost = a + b × context characters` fitted by least squares on the trajectories below.
+
 These numbers are the planner's expected output lengths per kind; the input part of the
 estimate comes from the size of the compact context of each task. On the bench sets the
 harness solves all feasible tasks (479/479 reward on a 200-task set at ~71 units per task,

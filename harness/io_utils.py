@@ -69,6 +69,14 @@ class Summary:
         except OSError:
             self.path = None
 
+    def record_estimates(self, estimates):
+        """Per-task token forecast (made before solving) and actual spend, next to the solutions."""
+        if not self.path:
+            return
+        path = os.path.join(os.path.dirname(self.path), "token_estimates.json")
+        with _LOCK:
+            atomic_write(path, json.dumps(estimates, ensure_ascii=False, indent=1, sort_keys=True))
+
     def record(self, task_id, answer):
         with _LOCK:
             self.data[task_id] = answer

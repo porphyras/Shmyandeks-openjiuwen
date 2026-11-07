@@ -133,20 +133,35 @@ def file_hash(path):
 
 # ---------------------------------------------------------------- tabular data
 
-def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20):
+TABLE_EXT = (".csv", ".tsv")
+
+
+def is_table(path):
+    return path.lower().endswith(TABLE_EXT)
+
+
+def table_sep(path):
+    if path.lower().endswith(".tsv"):
+        return "\t"
+    head = read_text(path, 4096).split("\n", 1)[0]
+    return max(("\t", ",", ";"), key=lambda c: (head.count(c), c == ","))
+
+
+def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None):
     """Header, row count, a few rows, distinct values of low-cardinality columns, numeric ranges.
     Streams the file (bounded memory); values are compared stripped."""
     try:
         if not stat.S_ISREG(os.stat(path).st_mode):
-            return "%s: not a regular file" % os.path.basename(path), {}
+            return "%s: not a regular file" % (name or os.path.basename(path)), {}
+        sep = table_sep(path)
         f = open(path, encoding="utf-8-sig", errors="replace", newline="")
     except OSError:
-        return "%s: unreadable" % os.path.basename(path), {}
+        return "%s: unreadable" % (name or os.path.basename(path)), {}
     header, head, nrows, nbytes = None, [], 0, 0
     distinct, lo, hi, numeric = [], [], [], []
     try:
         with f:
-            reader = csv.reader(f)
+            reader = csv.reader(f, delimiter=sep)
             for row in reader:
                 if header is None:
                     header = [c.strip() for c in row]
@@ -175,9 +190,11 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20):
                     break
     except (csv.Error, OSError, ValueError):
         pass
+    name = name or os.path.basename(path)
     if header is None:
-        return "%s: empty file" % os.path.basename(path), {}
-    lines = ["%s: %d rows; columns: %s" % (os.path.basename(path), nrows, ",".join(header))]
+        return "%s: empty file" % name, {}
+    lines = ["%s (%s-separated): %d rows; columns: %s" % (name, "tab" if sep == "\t" else "comma", nrows,
+                                                         ",".join(header))]
     lines += [",".join(r) for r in head]
     info = {"header": header, "values": {}}
     fmt = lambda x: str(int(x)) if x == int(x) else str(x)
@@ -205,8 +222,8 @@ def data_context(task):
     files = list_files(task.cwd)
     for p in files[:30]:
         rel = os.path.relpath(p, task.cwd)
-        if p.lower().endswith(".csv"):
-            brief, info = csv_brief(p)
+        if is_table(p):
+            brief, info = csv_brief(p, name=rel)
             parts.append(brief)
             csv_infos.append(info)
         else:
@@ -355,17 +372,26 @@ def kb_full_text(task, limit=MAX_KB_CTX):
 
 # ---------------------------------------------------------------- code
 
-def find_tests(cwd):
+def find_tests(cwd, instruction=""):
+    """Test files: test_*.py, *_test.py, tests.py, test.py, and any script the instruction
+    runs ("python3 X.py") that exists in the workspace."""
+    named = set(re.findall(r"python3?\s+(?:-m\s+\w+\s+)?([\w./-]+\.py)", instruction or ""))
     out = []
     for p in list_files(cwd, limit=500):
         b = os.path.basename(p)
-        if b.endswith(".py") and (b.startswith("test_") or b.endswith("_test.py")):
+        rel = os.path.relpath(p, cwd)
+        if not b.endswith(".py"):
+            continue
+        if b.startswith("test_") or b.endswith("_test.py") or b in ("tests.py", "test.py"):
+            out.append(p)
+        elif (rel in named or b in named) and re.search(r"\bunittest\b|\bpytest\b|^\s*assert\b|def test",
+                                                        read_text(p, 65536), re.M):
             out.append(p)
     return out
 
 
-def source_files(cwd):
-    tests = set(find_tests(cwd))
+def source_files(cwd, instruction=""):
+    tests = set(find_tests(cwd, instruction))
     return [p for p in list_files(cwd, limit=500) if p.endswith(".py") and p not in tests]
 
 
@@ -554,6 +580,7 @@ def test_contradictions(src):
                         problems.append("%s expected both %r and %r" % (ast.unparse(call), known[key], val))
                     known.setdefault(key, val)
                     break
+    problems += _self_contradictions(asserts, mods, funcs)
     if not known:
         return problems
     for n in asserts:
@@ -566,6 +593,11 @@ def test_contradictions(src):
                     if ok and v != val:
                         problems.append("%s contradicts required values" % ast.unparse(n)[:120])
                     break
+        elif attr in ("assertIsInstance", "assertNotIsInstance") and len(n.args) >= 2:
+            ok, v = _eval_subst(n.args[0], known)
+            types = _type_tuple(n.args[1])
+            if ok and types and (isinstance(v, types) != (attr == "assertIsInstance")):
+                problems.append("%s contradicts required values" % ast.unparse(n)[:120])
         elif attr in ("assertTrue", "assertFalse") and n.args:
             ok, val = _eval_subst(n.args[0], known)
             if ok and bool(val) != (attr == "assertTrue"):
@@ -587,6 +619,119 @@ def test_contradictions(src):
             if not res:
                 problems.append("%s contradicts required values" % ast.unparse(n)[:120])
     return problems
+
+
+_TYPES = {"int": int, "str": str, "float": float, "list": list, "dict": dict, "tuple": tuple, "bool": bool,
+          "set": set, "bytes": bytes, "type(None)": type(None)}
+
+
+def _type_tuple(node):
+    names = node.elts if isinstance(node, ast.Tuple) else [node]
+    out = []
+    for x in names:
+        t = _TYPES.get(ast.unparse(x))
+        if t is None:
+            return None
+        out.append(t)
+    return tuple(out)
+
+
+def _deterministic_expr(node, mods, funcs):
+    """Built only from literals and calls into the code under test (m.f(1), m.C(7).value())."""
+    for x in ast.walk(node):
+        if isinstance(x, ast.Name) and x.id not in mods and x.id not in funcs and x.id not in _SAFE_FUNCS:
+            return False
+        if isinstance(x, (ast.Lambda, ast.NamedExpr, ast.Await, ast.Yield)):
+            return False
+    return _has_call(node)
+
+
+def _self_contradictions(asserts, mods, funcs):
+    """x > x, x < x, x != x can never hold when x is a pure call m.f(<literals>) of a function
+    the tests elsewhere treat as pure (compared with a literal). Constructors, counters and
+    id generators are excluded: two calls may legitimately differ."""
+    out = []
+    def shape(x):
+        class Blank(ast.NodeTransformer):
+            def visit_Constant(self, c):
+                return ast.copy_location(ast.Name(id="_", ctx=ast.Load()), c)
+        return ast.unparse(Blank().visit(ast.parse(ast.unparse(x), mode="eval")))
+
+    pure_shapes = set()
+    for n in asserts:
+        if n.func.attr in ("assertEqual", "assertEquals") and len(n.args) >= 2:
+            for call, lit in ((n.args[0], n.args[1]), (n.args[1], n.args[0])):
+                if isinstance(call, ast.Call) and _lit(lit)[0] and _deterministic_expr(call, mods, funcs):
+                    pure_shapes.add(shape(call))
+
+    def pure_expr(x):
+        # same call shape compared with a literal elsewhere; not a bare constructor call
+        return (isinstance(x, ast.Call) and _deterministic_expr(x, mods, funcs) and shape(x) in pure_shapes
+                and not ast.unparse(x.func).split(".")[-1][:1].isupper())
+    strict = (ast.Lt, ast.Gt, ast.NotEq)
+    for n in asserts:
+        attr = n.func.attr
+        pair, bad = None, False
+        if attr in ("assertTrue", "assertFalse") and n.args and isinstance(n.args[0], ast.Compare) \
+                and len(n.args[0].ops) == 1:
+            c = n.args[0]
+            pair = (c.left, c.comparators[0])
+            op = c.ops[0]
+            bad = isinstance(op, strict) if attr == "assertTrue" else isinstance(op, (ast.Eq, ast.LtE, ast.GtE))
+        elif attr in ("assertGreater", "assertLess", "assertNotEqual") and len(n.args) >= 2:
+            pair, bad = (n.args[0], n.args[1]), True
+        if pair and bad and ast.dump(pair[0]) == ast.dump(pair[1]) and pure_expr(pair[0]):
+            out.append("%s can never hold" % ast.unparse(n)[:120])
+    # The same expression required to be instances of unrelated builtin types (int and str).
+    req = {}
+    for n in asserts:
+        if n.func.attr == "assertIsInstance" and len(n.args) >= 2 and _deterministic_expr(n.args[0], mods, funcs):
+            types = _type_tuple(n.args[1])
+            if types:
+                req.setdefault(ast.dump(n.args[0]), []).append((types, n))
+    for items in req.values():
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                a_t, b_t = items[i][0], items[j][0]
+                if not any(issubclass(x, y) or issubclass(y, x) for x in a_t for y in b_t):
+                    out.append("%s requires both %s and %s" % (ast.unparse(items[i][1].args[0])[:80],
+                                                               ast.unparse(items[i][1].args[1]),
+                                                               ast.unparse(items[j][1].args[1])))
+    return out
+
+
+def missing_fixtures(test_src, cwd):
+    """Files a test reads by a literal path that do not exist (only the source may be edited)."""
+    try:
+        tree = ast.parse(test_src)
+    except SyntaxError:
+        return []
+    reads, writes = set(), set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and ast.unparse(n.func) in ("open", "io.open", "Path", "pathlib.Path") and n.args \
+                and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str):
+            path = n.args[0].value
+            mode = ""
+            if len(n.args) > 1 and isinstance(n.args[1], ast.Constant):
+                mode = str(n.args[1].value)
+            for k in n.keywords:
+                if k.arg == "mode" and isinstance(k.value, ast.Constant):
+                    mode = str(k.value.value)
+            (writes if any(ch in mode for ch in "wax+") else reads).add(path)
+    if any(isinstance(n, ast.Attribute) and n.attr in ("write_text", "write_bytes", "mkdir", "touch", "makedirs",
+                                                       "copy", "copyfile", "copytree", "mkstemp", "mkdtemp",
+                                                       "TemporaryDirectory", "NamedTemporaryFile") for n in ast.walk(tree)):
+        return []
+    # A path also passed to the code under test (m.export("report.csv")) is produced by it.
+    produced = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and not (ast.unparse(n.func) in ("open", "io.open", "Path", "pathlib.Path")):
+            for a in list(n.args) + [k.value for k in n.keywords]:
+                if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                    produced.add(a.value)
+    reads -= produced
+    return ["test reads missing file %s" % p for p in sorted(reads - writes)
+            if re.search(r"\.\w{1,5}$", p) and not os.path.exists(os.path.join(cwd, p))]
 
 
 def missing_imports(test_src, cwd):

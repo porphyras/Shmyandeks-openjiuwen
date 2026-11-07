@@ -33,7 +33,7 @@ sleep 0.7
 T0=$(date +%s)
 (
   cd /
-  env -i PATH="$PATH" HOME="$RUN/home" LLM_BASE_URL="http://127.0.0.1:$PORT/v1" LLM_API_KEY=dummy \
+  mkdir -p "$RUN/out"; env -i PATH="$PATH" HOME="$RUN/home" OUT="$RUN/out" LLM_BASE_URL="http://127.0.0.1:$PORT/v1" LLM_API_KEY=dummy \
     HARNESS_TRACE="$RUN/trace.jsonl" HARNESS_WORKERS="${WORKERS:-2}" "$@" \
     "$PY" "$ENTRY" --tasks-dir "$RUN/tasks" > "$RUN/harness.log" 2>&1
 ) || true
