@@ -622,6 +622,10 @@ def missing_named_files(task, files=None):
     """Files the instruction names explicitly (e.g. "The file sales.csv ...") must exist."""
     files = files if files is not None else list_files(task.cwd, 2000)
     have = set(os.path.basename(p) for p in files) | set(os.path.relpath(p, task.cwd) for p in files)
-    named = set(re.findall(r"\b([\w./-]+\.(?:csv|tsv|json|md|txt|xlsx|py))\b", task.short_instruction()))
+    instr = task.short_instruction()
+    named = set(re.findall(r"\b([\w./-]+\.(?:csv|tsv|json|md|txt|xlsx|py))\b", instr))
+    # Files the task asks to produce are not expected to exist yet.
+    named -= set(re.findall(r"\b(?:to|into|as|save|write|create|output)\s+(?:a\s+|the\s+|file\s+)*"
+                            r"([\w./-]+\.(?:csv|tsv|json|md|txt|xlsx|py))\b", instr, re.I))
     return ["file %s not found" % n for n in sorted(named)
             if n not in have and os.path.basename(n) not in have and n != "answer.txt"]

@@ -49,9 +49,17 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
      documents they link to by name (up to three hops); the whole base only as a fallback;
    - code: the tests are run first; the model sees the source, the failing tests and a
      compressed test log.
-2. **One short call** to a no-reasoning model with a tiny prompt. The model replies with a
-   short Python program (computations, data questions), `ANSWER: <value>` (knowledge-base
-   questions) or only the functions it changed (code fixes).
+2. **One short call** to a no-reasoning model with a tiny prompt; the model returns an
+   artefact the harness can check, never free text:
+   - computations: a Python program, one assignment per quantity of the statement, no
+     comments (comment-free programs that collapse steps lose rounding details; one variable
+     per quantity keeps them and costs ~25 % fewer tokens than commented code);
+   - data questions on a single CSV: one pandas expression over `df` (the harness loads the
+     file and prints the value) — about half the tokens of a full program;
+   - knowledge-base questions: a single line `ANSWER: <value>` (or `NOT FOUND`);
+   - code fixes: only the functions it changed; the prompt shows the source and the
+     compressed test log (the failing assertion lines are in the traceback, so the test file
+     itself is not sent).
 3. **Free verification.** Programs are executed in the task directory (clean environment
    without `LLM_*` variables, timeout, output cap, memory limit); code fixes are merged into
    the file by function name and the tests are re-run (test files are hash-checked and never
@@ -112,8 +120,32 @@ Infeasible tasks get no `answer.txt` (configurable with `HARNESS_INFEASIBLE_ANSW
   same way, stops answering when the budget is spent; relays to the real proxy or answers from
   an oracle file (to test the mechanics for free);
 - `judge_sim.sh` — builds the image and runs it with the judge's exact flags against the stub;
+  `run_local.sh` — the same harness without Docker, from a code snapshot;
 - `gen_tasks.py` / `grade.py` — generator of training sets in the format of the examples
-  (all four kinds plus infeasible variants, hidden tests for code) and the grader.
+  (all four kinds plus 20 % infeasible variants of many sorts, hidden stricter tests for code)
+  and the grader; a second, independently written generator was used as a cross-check;
+- `stress/` — 29 failure scenarios (broken inputs, hostile model replies, proxy outages,
+  budget exhaustion, SIGTERM).
+
+Collected trajectories: every model call of the bench runs is logged (task, kind, model,
+prompt/completion tokens, cost, latency) — `bench/trajectories/calls_v5.csv`, aggregated by
+`bench/tools/collect_traj.py`. Cost per task (organisers' units) over 421 task runs on the
+real proxy (four sets, 2 generators):
+
+| kind | feasible | tasks | mean | median | p90 | calls/task |
+|---|---|---|---|---|---|---|
+| coding | yes | 88 | 109 | 111 | 151 | 1.00 |
+| data | yes | 88 | 56 | 56 | 68 | 1.00 |
+| data | no | 8 | 80 | 60 | 115 | 1.38 |
+| math | yes | 108 | 96 | 80 | 157 | 1.00 |
+| math | no | 27 | 147 | 96 | 153 | 1.11 |
+| search | yes | 88 | 36 | 37 | 41 | 1.00 |
+| search | no | 14 | 28 | 27 | 35 | 1.00 |
+
+These numbers are the planner's expected output lengths per kind; the input part of the
+estimate comes from the size of the compact context of each task. On the bench sets the
+harness solves all feasible tasks (479/479 reward on a 200-task set at ~71 units per task,
+infeasible ones included); a run of 100 tasks takes about a minute with 5 sessions.
 
 ## Open questions to the organisers
 
