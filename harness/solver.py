@@ -236,7 +236,9 @@ class Solver:
         if info.get("kind") == "coding" or first.status != "solved":
             return first
         o2 = self.solve(task, info, 1)
-        if o2.status == "solved" and o2.answer == first.answer:
+        if o2.status != "solved" or o2.answer == first.answer:
+            # Agreement, or no competing answer (a refusal or a failure): nothing to arbitrate.
+            # A judge is paid for only when two different answers stand.
             return first
         o3 = self.solve(task, info, 2)
         votes = [first.answer] + [o.answer for o in (o2, o3) if o.status == "solved"]
