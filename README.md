@@ -183,29 +183,40 @@ lower the planner's success estimate: the model looks once and may answer `IMPOS
   fixtures that have no place in a submitted project.
 
 Collected trajectories: every model call of the bench runs is logged (task, kind, model,
-prompt/completion tokens, cost, latency) — `bench/trajectories/calls_v5.csv`, aggregated by
-`bench/tools/collect_traj.py`. Cost per task (organisers' units) over 421 task runs on the
-real proxy (four sets, 2 generators):
+prompt/completion tokens, cost, latency) — `bench/trajectories/calls_*.csv`, aggregated by
+`bench/tools/collect_traj.py`. Before any call the harness also writes its forecast for every
+task (`estimate`, `p_success`, `ctx_chars`) and, after each task, the actual spend, to
+`token_estimates.json` next to the solutions file in `$OUT` (and to the trace). The forecast
+is a per-kind linear model `cost = a + b × context characters` fitted by least squares on
+these trajectories.
+
+Results on the real proxy (organisers' units; feasible reward solved / available):
+
+| set | tasks (infeasible) | what it is | solved reward | tokens |
+|---|---|---|---|---|
+| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~9–10k |
+| var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
+| var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 86–93 % | ~25–30k |
+| adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–93 % | ~5k |
+| hard | 116 (16) | GSM-Hard/GSM8K, MBPP with bugs, MuSiQue 2–4 hops, DABench | 92–93 % | ~30–40k |
+| math2 | 68 (8) | MATH-500 level 5, GSM8K, SVAMP, ASDiv | 94–96 % | ~25k |
+
+A blind hold-out set of 60 tasks built by a separate reviewer from other sources was run
+on intermediate versions: 77 % → 85 % → 90 % of feasible tasks solved. On sets in the
+format of the examples a run of 100 tasks takes about a minute with 5 sessions and costs
+about 100 units per task, infeasible ones included.
+
+Cost per task over all six sets above (one run each), by kind:
 
 | kind | feasible | tasks | mean | median | p90 | calls/task |
 |---|---|---|---|---|---|---|
-| coding | yes | 88 | 109 | 111 | 151 | 1.00 |
-| data | yes | 88 | 56 | 56 | 68 | 1.00 |
-| data | no | 8 | 80 | 60 | 115 | 1.38 |
-| math | yes | 108 | 96 | 80 | 157 | 1.00 |
-| math | no | 27 | 147 | 96 | 153 | 1.11 |
-| search | yes | 88 | 36 | 37 | 41 | 1.00 |
-| search | no | 14 | 28 | 27 | 35 | 1.00 |
-
-Before any call the harness writes its forecast for every task (`estimate`, `p_success`,
-`ctx_chars`) and, after each task, the actual spend, to `token_estimates.json` next to the
-solutions file in `$OUT` (and to the trace). The forecast is a per-kind linear model
-`cost = a + b × context characters` fitted by least squares on the trajectories below.
-
-These numbers are the planner's expected output lengths per kind; the input part of the
-estimate comes from the size of the compact context of each task. On the bench sets the
-harness solves all feasible tasks (479/479 reward on a 200-task set at ~71 units per task,
-infeasible ones included); a run of 100 tasks takes about a minute with 5 sessions.
+| coding | yes | 79 | 385 | 151 | 798 | 1.34 |
+| data | yes | 80 | 120 | 80 | 257 | 1.02 |
+| data | no | 15 | 210 | 99 | 415 | 1.27 |
+| math | yes | 136 | 283 | 150 | 683 | 1.65 |
+| math | no | 27 | 348 | 163 | 880 | 1.74 |
+| search | yes | 87 | 195 | 88 | 387 | 1.11 |
+| search | no | 30 | 227 | 130 | 520 | 1.47 |
 
 ## Open questions to the organisers
 
