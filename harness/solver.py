@@ -30,10 +30,12 @@ CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S)
 _CLEAN = """def _clean(d):
     import re as _re
     for c in d.columns:
-        if d[c].dtype == object or pd.api.types.is_string_dtype(d[c]):
-            s = d[c].astype(str).str.strip()
+        if (d[c].dtype == object or pd.api.types.is_string_dtype(d[c])) and not _re.search(
+                r"(^|[^a-z])(id|zip|code|phone|postal|sku)([^a-z]|$)", str(c).lower()):
+            s = d[c].fillna("").astype(str).str.strip()
             filled = s[~s.str.lower().isin(["", "nan", "na", "n/a", "none", "null", "-"])]
-            if len(filled) and filled.str.contains(r"[,$€£ ]|^\\d", regex=True).any():
+            if len(filled) and filled.str.contains(r"[,$€£ ]|^\\d", regex=True).any() and \
+                    not filled.str.match(r"^0\\d").any():
                 num = pd.to_numeric(filled.str.replace(r"[$€£,\\s]", "", regex=True), errors="coerce")
                 if num.notna().mean() >= 0.8:
                     d[c] = pd.to_numeric(s.str.replace(r"[$€£,\\s]", "", regex=True), errors="coerce")
@@ -315,8 +317,8 @@ class Solver:
                 continue
             model_code = code
             if prelude:
-                code = prelude + (code if "print(" in code else
-                                  "_r = (%s)\n%s" % (code.strip(), _PRINT_SCALAR))
+                code = _fix_query_columns(code, data)
+                code = prelude + (code if "print(" in code else _wrap_last_expr(code) + _PRINT_SCALAR)
             ans_path = os.path.join(task.cwd, "answer.txt")
             before = _mtime(ans_path)
             rc, out, err = sandbox.run_python_code(code, task.cwd, timeout=30)
@@ -455,7 +457,9 @@ class Solver:
             if n_now > n_orig:
                 for p in files:
                     _write(p, original[p])
-        return Outcome("failed", "DONE", note="tests still failing")  # best guess; a later pass may fix it
+        # No DONE without passing tests: with failing visible tests the hidden ones fail too,
+        # and contradictory tests must stay recognisably unsolved.
+        return Outcome("failed", note="tests still failing")
 
     def protect(self, info):
         """Undo later changes (by other programs) to a coding task's tests and fixed source."""
@@ -533,6 +537,45 @@ def _kb_span(raw, corpus):
     return ""
 
 
+def _wrap_last_expr(code):
+    """Run the statements, then capture the value of the last expression as _r (models often
+    send "import math\nmath.floor(...)" when asked for one expression)."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return "_r = (%s)\n" % code.strip()
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        head = ast.unparse(ast.Module(body=tree.body[:-1], type_ignores=[]))
+        return (head + "\n" if head else "") + "_r = (%s)\n" % ast.unparse(tree.body[-1].value)
+    if tree.body and isinstance(tree.body[-1], ast.Assign) and len(tree.body[-1].targets) == 1:
+        return code + "\n_r = %s\n" % ast.unparse(tree.body[-1].targets[0])
+    return code + "\n_r = None\n"
+
+
+def _fix_query_columns(code, ctx_text):
+    """Back-quote column names with spaces inside DataFrame.query() strings."""
+    cols = set()
+    for m in re.finditer(r"; columns: ([^\n]+)", ctx_text or ""):
+        cols |= {c.strip() for c in m.group(1).split(",") if " " in c.strip()}
+    if not cols or ".query(" not in code:
+        return code
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+    changed = False
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "query" and n.args \
+                and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str):
+            q = n.args[0].value
+            for c in sorted(cols, key=len, reverse=True):
+                q2 = re.sub(r"(?<![`\w])%s(?![`\w])" % re.escape(c), "`%s`" % c, q)
+                if q2 != q:
+                    q, changed = q2, True
+            n.args[0].value = q
+    return ast.unparse(tree) if changed else code
+
+
 def _defined_names(src):
     """Top-level functions/classes and class methods defined in a source file."""
     try:
@@ -600,17 +643,21 @@ def merge_functions(original, patch, add_new=True, skip_new=()):
             others.append((assign_key(node), text))
     # Methods sent without their class ("def pop(self): ...") go back into the class that has them.
     top_defs = {n.name for n in otree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    owner = {}
+    owners = {}
     for n in otree.body:
         if isinstance(n, ast.ClassDef):
             for b in n.body:
                 if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    owner.setdefault(b.name, n.name)
+                    owners.setdefault(b.name, []).append(n.name)
     reroute = {}
     for node in ptree.body:
-        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in owner
-                and node.name not in top_defs and node.args.args and node.args.args[0].arg in ("self", "cls")):
-            reroute.setdefault(owner[node.name], []).append(newdefs.pop(node.name))
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name not in top_defs
+                and node.args.args and node.args.args[0].arg in ("self", "cls")):
+            cls_names = owners.get(node.name, [])
+            newdefs.pop(node.name, None)  # never add a bare method as a module function
+            if len(cls_names) == 1:  # ambiguous when several classes define it: leave it out
+                s_, e_ = span(node)
+                reroute.setdefault(cls_names[0], []).append("\n".join(plines[s_:e_]))
     for cname, texts in reroute.items():
         if cname in newclasses:
             src = newclasses[cname][1].rstrip("\n") + "\n\n" + "\n".join(textwrap.indent(t, "    ") for t in texts)

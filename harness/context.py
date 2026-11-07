@@ -176,7 +176,10 @@ def pandas_load(path, rel):
     else:
         args.append("encoding='utf-8-sig'")
     head = read_text(path, 8192)
-    if sep == ";" and re.search(r"\d,\d", head):
+    # Decimal comma only when every "d,d" looks like a decimal (1-2 digits after the comma)
+    # and no decimal point is used; "1,250" is a thousands separator (handled later).
+    commas = re.findall(r"\d,(\d+)", head)
+    if sep == ";" and commas and all(len(x) <= 2 for x in commas) and not re.search(r"\d\.\d", head):
         args.append("decimal=','")
     args.append("skipinitialspace=True, on_bad_lines='skip'")
     return "pd.read_csv(%s)" % ", ".join(args)
@@ -322,7 +325,7 @@ def kb_docs(task):
     docs = []
     for p in list_files(task.cwd, limit=10000):
         if os.path.splitext(p)[1].lower() in (".md", ".txt", ".json", ".yaml", ".yml", ".csv", ""):
-            docs.append((os.path.relpath(p, task.cwd), read_text(p, 8192).strip()))
+            docs.append((os.path.relpath(p, task.cwd), read_text(p, 65536).strip()))
     return docs
 
 
@@ -407,7 +410,8 @@ def prose_passages(docs, instr, limit, extra=""):
     if extra:
         # Names the model reached in a first attempt: they lead to the next hop's paragraphs.
         names = re.findall(r"\b([A-Z][\w\-]+(?:\s+[A-Z][\w\-]+)*)\b", extra)
-        q += [w for n in names for w in _norm(n).split() if w not in _STOP and len(w) > 2]
+        q += [w for n in names if not n.isupper() for w in _norm(n).split()
+              if w not in _STOP and w not in ("answer", "not", "found", "reply", "knowledge") and len(w) > 2]
     order, scores = _bm25_rank(passages, q)
     chosen, size = [], 0
     for i in order[:6]:
@@ -707,7 +711,7 @@ def _pure_call(node, mods, funcs, impure=frozenset()):
         name = f.id
     else:
         return False
-    if name in impure or not (node.args or node.keywords):
+    if name in impure:
         return False
     return _call_key(node) is not None
 
@@ -745,8 +749,11 @@ def impure_functions(sources):
                     if x.func.attr in _MUTATORS and isinstance(base, ast.Name) and base.id in module_names \
                             and base.id not in local:
                         bad = True
-                    if isinstance(base, ast.Name) and base.id in ("random", "time", "datetime", "uuid", "itertools"):
+                    if isinstance(base, ast.Name) and base.id in ("random", "time", "datetime", "uuid", "itertools", "secrets", "os"):
                         bad = True
+                elif isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id in ("next", "input", "open") \
+                        and any(isinstance(a, ast.Name) and a.id in module_names for a in x.args):
+                    bad = True
                 elif isinstance(x, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
                     targets = x.targets if isinstance(x, (ast.Assign, ast.Delete)) else [x.target]
                     for tg in targets:
@@ -874,9 +881,8 @@ def _uses_impure(node, impure):
             name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
             if name in impure:
                 return True
-            if not (x.args or x.keywords) and not (isinstance(f, ast.Name) and f.id in _SAFE_FUNCS) \
-                    and not (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Call)):
-                return True  # zero-argument module calls (counters, ids, new objects) may differ
+            if not (x.args or x.keywords) and isinstance(f, ast.Name) and f.id[:1].isupper():
+                return True  # a bare constructor: two instances may differ
     return False
 
 
