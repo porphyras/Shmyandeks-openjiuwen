@@ -249,8 +249,10 @@ task (`estimate`, `p_success`, `ctx_chars`) and, after each task, the actual spe
 is a per-kind linear model `cost = max(floor, a + b × context characters)` fitted by least
 absolute deviations (the median forecast, which minimises the mean absolute error) on 664
 tasks of these trajectories, retries, second opinions and escalations included; an upper
-bound `estimate_p90 = forecast × q90(actual/forecast)` is written next to it. In-sample
-quality per kind (organisers' units):
+bound `estimate_p90 = forecast × q90(actual/forecast)` is written next to it. A question on a
+large prose base read as paragraphs gets 2.5× the search forecast: the fit sees only the first
+excerpt, while such a task takes one call (~280 units) or two-three looks with 12k-character
+excerpts (650–1600). In-sample quality per kind (organisers' units):
 
 | kind | tasks | mean actual | MAE | under-forecast | p90 factor |
 |---|---|---|---|---|---|

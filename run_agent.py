@@ -174,6 +174,11 @@ class Run:
         kind = info.get("kind", "math")
         a, b, floor, _p90 = COST_FIT.get(kind, (60.0, 0.1, 40, 2.0))
         cost = max(floor, a + b * info.get("ctx_chars", 0))
+        if kind == "search" and not info.get("kb_cards", True) and not info.get("kb_complete", True):
+            # A large prose base seen as paragraphs: one call when the first excerpt holds the
+            # answer (~280 on var2), else two or three looks with 12k-character excerpts (650-1600);
+            # the linear fit above only sees the first excerpt.
+            cost *= 2.5
         p = PRIOR_P.get(kind, 0.6)
         if info.get("problems"):
             p *= 0.05
