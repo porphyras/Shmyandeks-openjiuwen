@@ -71,11 +71,14 @@ tokens the budget is counted in.
    A task is answered by plain code only when every sentence of its statement matches a known
    form with an unambiguous meaning and the data it refers to checks out: warehouse stock
    computations built from the example operations (ship per day, deliveries, split and keep a
-   share rounded down, double/triple, explicit percent rules); questions over the sales table
+   share rounded down, double/triple, explicit percent rules, fractions; also in other words:
+   another place or item, "First,"/"Next,"/"Finally,", two operations joined by ", and"); questions over the sales table
    (units/revenue/orders/maximum/average by product, region, month or month range; an exact
    half in "rounded to the nearest integer" goes to the model) after verifying the file, its
    header and its row count, with a non-empty selection; knowledge-base questions over a base
-   made only of "# Name" + "Key: Value" cards, following the named fields (born, employer,
+   made only of "# Name" + "Key: Value" cards (or cards whose every sentence is one of the known
+   card sentences: "Born in 1980, X is a designer at Y.", "Headquartered in Graz, Y has been
+   operating since it was founded in 1994."), following the named fields (born, employer,
    headquarters, founded, mentor), year differences, "born before" checks and head counts
    (only when no card writes the company another way) with every card present. The same full parse also
    settles infeasible tasks for free: a stock that the statement never gives ("starts with some

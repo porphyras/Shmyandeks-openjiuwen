@@ -57,6 +57,60 @@ _VAGUE = [
 ]
 _EXACTLY = re.compile(r"After that it has exactly (\d+) boxes\.")
 
+# Other wordings of the same statements (generated variants): a different place or item, words
+# of sequence ("First,", "Next,", "Finally,"), two operations in one sentence (", and").
+_START2 = re.compile(r"An? (warehouse|depot|store|shop) (?:starts with|holds|has) (\d+|some) ([a-z]+)(?: at the start)?\.")
+_QUESTION2 = re.compile(r"How many ([a-z]+) does (?:it|the (warehouse|depot|store|shop)) (?:have|hold) (?:at the end|now)\?")
+_SEQ = re.compile(r"^(?:First|Next|Then|After that|Afterwards|Finally|Later),?\s+", re.I)
+_FRACTION = {"half": 2, "third": 3, "quarter": 4, "fifth": 5}
+_OPS2 = [
+    (r"it ships (\d+) boxes per day for (\d+) days", lambda x, n, d: x - n * d),
+    (r"it receives (\d+) deliveries of (\d+) boxes each", lambda x, k, m: x + k * m),
+    (r"(\d+) trucks arrive, each carrying (\d+) boxes", lambda x, k, m: x + k * m),
+    (r"(\d+) trucks arrive with (\d+) boxes each", lambda x, k, m: x + k * m),
+    (r"(?:its|the) stock is doubled (?:again )?(?:by merging with (?:a|another) sister warehouse|after a merger)",
+     lambda x: 2 * x),
+    (r"it merges with a sister warehouse, which doubles its stock", lambda x: 2 * x),
+    (r"(?:its|the) stock is tripled (?:after a merger|by merging with two sister warehouses of the same size)",
+     lambda x: 3 * x),
+    (r"(?:its|the) stock is (?:split equally into|divided evenly among) (\d+) warehouses and it keeps (?:one|a single) "
+     r"share \(round(?:ed)? down\)", lambda x, w: x // w),
+    (r"customers return (\d+) boxes(?:, which are added back to the stock)?", lambda x, r: x + r),
+    (r"it sends one (half|third|quarter|fifth) of its stock \(rounded down\) to a partner (?:store|warehouse)",
+     lambda x, f: x - x // _FRACTION[f]),
+    (r"(\d+)% of the stock \(rounded down\) is (?:damaged by water and thrown away|lost to damage)",
+     lambda x, p: x - x * int(p) // 100),
+    (r"it ships (\d+) boxes", lambda x, n: x - n),
+]
+_VAGUE2 = [r"a flood destroys part of the stock", r"it ships \d+ boxes per day for (?:several|a few|some) days",
+           r"(?:part|some) of the stock is (?:lost|damaged|stolen)"]
+
+
+def _variant_clauses(sentence, item, place):
+    """The sentence as normalised clauses: sequence word dropped, item -> boxes, place ->
+    warehouse, split at ', and '."""
+    s = _SEQ.sub("", sentence.rstrip("."))
+    s = re.sub(r"\b%s\b" % re.escape(item), "boxes", s)
+    if place != "warehouse":
+        s = re.sub(r"\b%ss\b" % place, "warehouses", s)
+        s = re.sub(r"\b%s\b" % place, "warehouse", s)
+    return [c.strip() for c in re.split(r",\s+and\s+", s) if c.strip()]
+
+
+def _apply_variant(x, clause):
+    """(matched, new x) for one normalised clause; x None stays None (unknown stock)."""
+    for pat in _VAGUE2:
+        if re.fullmatch(pat, clause, re.I):
+            return True, None
+    for pat, fn in _OPS2:
+        m = re.fullmatch(pat, clause, re.I)
+        if m:
+            if x is None:
+                return True, None
+            args = [g if g in _FRACTION else int(g) for g in m.groups()]
+            return True, fn(x, *args)
+    return False, x
+
 
 def solve_math(task):
     """Returns ("solved", answer) / ("infeasible", note) / None."""
@@ -64,9 +118,15 @@ def solve_math(task):
     if len(sents) < 3:
         return None
     m = _START.fullmatch(sents[0])
-    if not m or not _QUESTION.fullmatch(sents[-1]):
-        return None
-    x = None if m.group(1) == "some" else int(m.group(1))  # None: a stock the text never gives
+    item, place = "boxes", "warehouse"
+    if m and _QUESTION.fullmatch(sents[-1]):
+        x = None if m.group(1) == "some" else int(m.group(1))  # None: a stock the text never gives
+    else:
+        m2, q2 = _START2.fullmatch(sents[0]), _QUESTION2.fullmatch(sents[-1])
+        if not m2 or not q2 or q2.group(1) != m2.group(3) or (q2.group(2) and q2.group(2) != m2.group(1)):
+            return None
+        place, item = m2.group(1), m2.group(3)
+        x = None if m2.group(2) == "some" else int(m2.group(2))
     for s in sents[1:-1]:
         e = _EXACTLY.fullmatch(s)
         if e:
@@ -91,7 +151,20 @@ def solve_math(task):
                         return None  # an odd case (more damaged boxes than delivered): the model looks
                 break
         else:
-            return None  # a sentence we do not understand: the model decides
+            # Another wording: every clause of the sentence must be a known operation.
+            clauses = _variant_clauses(s, item, place)
+            for cl in clauses:
+                try:
+                    ok, x = _apply_variant(x, cl)
+                except ZeroDivisionError:
+                    return ("infeasible", "a division by zero (0 warehouses or crates)")
+                if not ok:
+                    return None  # a sentence we do not understand: the model decides
+                if x is not None and x < 0:
+                    return None
+            if not clauses:
+                return None
+            continue
         if x is not None and x < 0:
             return None  # negative stock: something is off, let the model look
     if x is None:
@@ -149,9 +222,60 @@ def _nearest(total, n):
 _SALES_COLS = ["order_id", "region", "product", "month", "units", "price"]
 
 
+_ROUND = re.compile(r"Round the result to (\d) decimal places?\.")
+_NAME_ONLY = "Answer with the product name."
+
+
+def _round_half_up(value, places):
+    """A Fraction rounded half up to `places` decimals as text; None on an exact half (the
+    rounding rule would matter and is not stated beyond 'round')."""
+    from fractions import Fraction
+    q = Fraction(value) * 10 ** places
+    lo = q.numerator // q.denominator
+    rem = q - lo
+    if rem == Fraction(1, 2):
+        return None
+    n = lo + (1 if rem > Fraction(1, 2) else 0)
+    return "%d.%0*d" % (n // 10 ** places, places, n % 10 ** places) if places else str(n)
+
+
+def _argmax_product(sel):
+    tot = {}
+    for r in sel:
+        tot[r["product"]] = tot.get(r["product"], 0) + r["units"]
+    best = sorted(tot.items(), key=lambda kv: -kv[1])
+    if len(best) > 1 and best[0][1] == best[1][1]:
+        return None  # a tie: no single answer
+    return best[0][0]
+
+
+_DATA_Q2 = [  # (question, row filter, aggregate, allowed closing instruction)
+    (re.compile(r"What is the average price of product '([^']+)' over all its orders\?"),
+     lambda r, p: r["product"] == p, lambda sel: __import__("fractions").Fraction(sum(r["price"] for r in sel), len(sel)),
+     "round"),
+    (re.compile(r"What was the total revenue \(units multiplied by price, summed over orders\) from region '([^']+)' "
+                r"in month (\d+)\?"),
+     lambda r, g, mo: r["region"] == g and r["month"] == int(mo), lambda sel: sum(r["units"] * r["price"] for r in sel),
+     None),
+    (re.compile(r"How many orders from region '([^']+)' had at least (\d+) units\?"),
+     lambda r, g, n: r["region"] == g and r["units"] >= int(n), len, None),
+    (re.compile(r"Which product had the highest total number of units sold in region '([^']+)'\?"),
+     lambda r, g: r["region"] == g, _argmax_product, "name"),
+    (re.compile(r"What is the largest number of units in a single order of product '([^']+)' in region '([^']+)'\?"),
+     lambda r, p, g: r["product"] == p and r["region"] == g, lambda sel: max(r["units"] for r in sel), None),
+]
+
+
 def solve_data(task):
     text = task.short_instruction()
     sents = _sentences(text)
+    tail = None
+    if len(sents) == 3:
+        rm = _ROUND.fullmatch(sents[2])
+        tail = ("round", int(rm.group(1))) if rm else ("name", None) if sents[2] == _NAME_ONLY else None
+        if tail is None:
+            return None
+        sents = sents[:2]
     if len(sents) != 2:
         return None
     h = _HEAD.fullmatch(sents[0])
@@ -182,10 +306,12 @@ def solve_data(task):
                          "units": int(r[4]), "price": int(r[5])})
     except ValueError:
         return None
-    for rx, keep, agg in _DATA_Q:
+    for rx, keep, agg, closing in [(a, b, c, None) for a, b, c in _DATA_Q] + _DATA_Q2:
         m = rx.fullmatch(sents[1])
         if not m:
             continue
+        if (tail[0] if tail else None) != closing and not (closing == "name" and tail is None):
+            return None  # a closing instruction this question does not take (or a missing one)
         # A quoted value that also occurs in another spelling (case, spaces) is ambiguous.
         quoted = set(re.findall(r"'([^']+)'", sents[1]))
         for col in ("product", "region"):
@@ -199,6 +325,12 @@ def solve_data(task):
         value = agg(sel)
         if value is None:
             return None
+        if closing == "round":
+            if not tail:
+                return None  # an average without a stated rounding: the model decides the format
+            value = _round_half_up(value, tail[1])
+            if value is None:
+                return None
         return ("solved", str(value))
     return None
 
@@ -220,10 +352,65 @@ _SEARCH_Q = [
     (re.compile(r"Where is the headquarters of %s's employer\?" % _NAME), ["Employer", "Headquarters"]),
     (re.compile(r"In which year was %s founded\?" % _NAME), ["Founded"]),
     (re.compile(r"In which city is the headquarters of %s\?" % _NAME), ["Headquarters"]),
+    (re.compile(r"In which year was the company that employs %s's mentor founded\?" % _NAME),
+     ["Mentor", "Employer", "Founded"]),
+    (re.compile(r"In which city is the company that employs %s's mentor headquartered\?" % _NAME),
+     ["Mentor", "Employer", "Headquarters"]),
+    (re.compile(r"What is the founding year of the company where %s works\?" % _NAME), ["Employer", "Founded"]),
+    (re.compile(r"Who is the mentor of %s's mentor\?" % _NAME), ["Mentor", "Mentor"]),
+    (re.compile(r"Who is %s's mentor\?" % _NAME), ["Mentor"]),
+    # two sentences: "X's mentor works for a company. In which city is that company headquartered?"
+    (re.compile(r"%s's mentor works for a company\. In which city is that company headquartered\?" % _NAME),
+     ["Mentor", "Employer", "Headquarters"]),
+    (re.compile(r"%s's mentor works for a company\. In which year was that company founded\?" % _NAME),
+     ["Mentor", "Employer", "Founded"]),
 ]
 _OLDER = re.compile(r"How many years older is %s than %s\?" % (_NAME, _NAME))
 _BEFORE = re.compile(r"Was %s born before (\d{4})\?" % _NAME)
 _STAFF = re.compile(r"How many people work for %s\?" % _NAME)
+
+
+# Card bodies written as sentences instead of "Key: Value" lines; {T} is the card's title.
+_CARD_SENT = [
+    (r"Year of birth: (\d{4})", "Born"),
+    (r"{T} was born in (\d{4})", "Born"),
+    (r"{T} joined (.+?) as an? [a-z][a-z ]*", "Employer"),
+    (r"{T} works (?:at|for) (.+?)", "Employer"),
+    (r"Mentor at work: (.+?)", "Mentor"),
+    (r"(.+?) is {T}'s mentor", "Mentor"),
+    (r"{T}'s mentor is (.+?)", "Mentor"),
+    (r"{T} was founded in (\d{4})", "Founded"),
+    (r"The company is headquartered in (.+?)", "Headquarters"),
+    (r"{T} is headquartered in (.+?)", "Headquarters"),
+    (r"Born in (\d{4}), {T} is an? [a-z][a-z ]* at (.+?)", ("Born", "Employer")),
+    (r"{T} \(born (\d{4})\) is employed by (.+?)", ("Born", "Employer")),
+    (r"{T} is employed by (.+?)", "Employer"),
+    (r"{T} is mentored by (.+?)", "Mentor"),
+    (r"(.+?) has been the mentor of {T} for [a-z ]+", "Mentor"),
+    (r"(.+?) has been the mentor of {T}", "Mentor"),
+    (r"Headquartered in (.+?), {T} has been operating since it was founded in (\d{4})", ("Headquarters", "Founded")),
+    (r"Founded in (\d{4}), {T} is headquartered in (.+?)", ("Founded", "Headquarters")),
+]
+
+
+def _sentence_fields(title, body):
+    """{field: value} if every sentence of a card body is one of the known forms, else None."""
+    fields = {}
+    text = " ".join(body)
+    parts = [p.strip() for p in re.split(r"(?<=\.)\s+|,\s+and\s+", text) if p.strip()]
+    for part in parts:
+        part = part.rstrip(".").strip()
+        for pat, key in _CARD_SENT:
+            m = re.fullmatch(pat.replace("{T}", re.escape(title)), part)
+            if m:
+                for k, v in zip(key if isinstance(key, tuple) else (key,), m.groups()):
+                    if k in fields:
+                        return None  # stated twice: ambiguous
+                    fields[k] = v.strip()
+                break
+        else:
+            return None
+    return fields
 
 
 def _cards(task):
@@ -234,14 +421,17 @@ def _cards(task):
         if not lines or not lines[0].startswith("# "):
             return None
         fields = {}
-        for l in lines[1:]:
-            m = re.fullmatch(r"([A-Z][\w ]{0,30}):\s*(.+)", l)
-            if not m:
-                return None  # prose or anything unusual: not a pure card base
-            key = m.group(1).strip()
-            if key in fields:
-                return None  # the same field twice: ambiguous
-            fields[key] = m.group(2).strip()
+        kv = [re.fullmatch(r"([A-Z][\w ]{0,30}):\s*(.+)", l) for l in lines[1:]]
+        if all(kv):
+            for m in kv:
+                key = m.group(1).strip()
+                if key in fields:
+                    return None  # the same field twice: ambiguous
+                fields[key] = m.group(2).strip()
+        else:
+            fields = _sentence_fields(lines[0][2:].strip(), lines[1:])
+            if fields is None:
+                return None  # prose beyond the known card sentences: not a card base
         title = lines[0][2:].strip().lower()
         if title in cards:
             return None  # two cards with one name: ambiguous
@@ -293,8 +483,9 @@ def _no_such_field(card, field):
 
 def solve_search(task):
     sents = _sentences(task.short_instruction())
-    if len(sents) != 2 or sents[0] != _SEARCH_PRE:
+    if len(sents) not in (2, 3) or sents[0] != _SEARCH_PRE:
         return None
+    sents = [sents[0], " ".join(sents[1:])]  # a question told in two sentences stays one unit
     for rx, chain in _SEARCH_Q:
         m = rx.fullmatch(sents[1])
         if not m:
