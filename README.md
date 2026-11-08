@@ -175,8 +175,10 @@ answer without a free check gets an independent second opinion.
   probability by kind, lowered sharply when the free inspection finds a problem.
 - Tasks are processed greedily by `reward × p(success) / p90 cost forecast` with up to 5 parallel
   sessions. With an unknown budget this order is near-optimal because every task costs well
-  under 1 % of the budget; when a budget is given, tasks that no longer fit are skipped in
-  favour of cheaper ones, and the remainder is checked before every call. Proxy errors never
+  under 1 % of the budget; when a budget is given, tasks beyond the actual remainder are
+  skipped in favour of cheaper ones. Tasks blocked only by in-flight reservations are
+  reconsidered after the active workers finish, with their original priorities and retry
+  levels; the remainder is checked before every call. Proxy errors never
   end the run on their own (failed calls cost nothing): each call is retried with backoff for
   up to three minutes, then the task waits for a later pass; only an explicit out-of-quota
   answer stops new calls. Everything solved is already on disk at any moment.
