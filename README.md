@@ -72,10 +72,12 @@ tokens the budget is counted in.
    form with an unambiguous meaning and the data it refers to checks out: warehouse stock
    computations built from the example operations (ship per day, deliveries, split and keep a
    share rounded down, double/triple, explicit percent rules); questions over the sales table
-   (units/revenue/orders/maximum by product, region, month range) after verifying the file,
-   its header and its row count, with a non-empty selection; knowledge-base questions over a
-   base made only of "# Name" + "Key: Value" cards, following the named fields (born,
-   employer, headquarters, founded, mentor) with every card present. The same full parse also
+   (units/revenue/orders/maximum/average by product, region, month or month range; an exact
+   half in "rounded to the nearest integer" goes to the model) after verifying the file, its
+   header and its row count, with a non-empty selection; knowledge-base questions over a base
+   made only of "# Name" + "Key: Value" cards, following the named fields (born, employer,
+   headquarters, founded, mentor), year differences, "born before" checks and head counts
+   (only when no card writes the company another way) with every card present. The same full parse also
    settles infeasible tasks for free: a stock that the statement never gives ("starts with some
    boxes", "a few deliveries", "several warehouses") or that contradicts a stated "after that it
    has exactly N boxes"; a person or company with no card that could be it (no title containing
@@ -85,8 +87,8 @@ tokens the budget is counted in.
    stock — goes to the model path below, so a misparse costs tokens, never a wrong answer. Over the
    bench runs the fast path gave 1,224 answers on 213 distinct tasks with zero errors (it
    never fires on the paraphrased and hard sets); on sets in the examples' format it covers
-   about half of the tasks. Over all bench sets (subsets counted separately) it now answers 383
-   task instances and declares 65 infeasible, with no wrong answer and no false verdict (the
+   about half of the tasks. Over all bench sets (subsets counted separately) it now answers 434
+   task instances and declares 66 infeasible, with no wrong answer and no false verdict (the
    solvable/unsolvable twins included). Code tasks are repaired without the model when the same
    functions appear in other code tasks of the run (the two code examples share four
    functions, each with a different one broken): a definition whose own tests passed in another
@@ -301,7 +303,7 @@ repeated runs of the stable versions of 07.11–08.11):
 
 | set | tasks (infeasible) | what it is | solved reward | tokens |
 |---|---|---|---|---|
-| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~1.9k (fast path, code repair) |
+| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~1.6k (fast path, code repair) |
 | var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
 | var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 141–146/152 (93–96 %) | ~25–33k |
 | adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–97/99 (91–98 %) | ~5k |

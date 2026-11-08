@@ -122,7 +122,30 @@ _DATA_Q = [
      lambda r, g: r["region"] == g, len),
     (re.compile(r"What is the largest number of units in a single order in region '([^']+)'\?"),
      lambda r, g: r["region"] == g, lambda sel: max(r["units"] for r in sel)),
+    # the same questions in other words seen in generated variants
+    (re.compile(r"In total, how many units of product '([^']+)' were sold in months (\d+) through (\d+) inclusive\?"),
+     lambda r, p, a, b: r["product"] == p and int(a) <= r["month"] <= int(b), lambda sel: sum(r["units"] for r in sel)),
+    (re.compile(r"What is the total revenue \(units \* price\) of all orders in region '([^']+)'\?"),
+     lambda r, g: r["region"] == g, lambda sel: sum(r["units"] * r["price"] for r in sel)),
+    (re.compile(r"How many orders of product '([^']+)' were placed in region '([^']+)'\?"),
+     lambda r, p, g: r["product"] == p and r["region"] == g, len),
+    (re.compile(r"How many units were sold in region '([^']+)' in month (\d+)\?"),
+     lambda r, g, mo: r["region"] == g and r["month"] == int(mo), lambda sel: sum(r["units"] for r in sel)),
+    (re.compile(r"What is the average number of units per order for product '([^']+)', rounded down to an integer\?"),
+     lambda r, p: r["product"] == p, lambda sel: sum(r["units"] for r in sel) // len(sel)),
+    (re.compile(r"What is the average price of product '([^']+)', rounded down to an integer\?"),
+     lambda r, p: r["product"] == p, lambda sel: sum(r["price"] for r in sel) // len(sel)),
+    (re.compile(r"What is the average price of product '([^']+)', rounded to the nearest integer\?"),
+     lambda r, p: r["product"] == p, lambda sel: _nearest(sum(r["price"] for r in sel), len(sel))),
 ]
+
+
+def _nearest(total, n):
+    """total / n to the nearest integer; None on an exact half (the rounding rule is unstated)."""
+    q, rem = divmod(total, n)
+    if 2 * rem == n:
+        return None
+    return q + (1 if 2 * rem > n else 0)
 _SALES_COLS = ["order_id", "region", "product", "month", "units", "price"]
 
 
@@ -173,7 +196,10 @@ def solve_data(task):
         sel = [r for r in rows if keep(r, *m.groups())]
         if not sel:
             return None  # nothing matches (absent value or period): the model decides
-        return ("solved", str(agg(sel)))
+        value = agg(sel)
+        if value is None:
+            return None
+        return ("solved", str(value))
     return None
 
 
@@ -191,7 +217,13 @@ _SEARCH_Q = [
     (re.compile(r"In which year was %s's mentor born\?" % _NAME), ["Mentor", "Born"]),
     (re.compile(r"In which city is the headquarters of the employer of %s's mentor\?" % _NAME),
      ["Mentor", "Employer", "Headquarters"]),
+    (re.compile(r"Where is the headquarters of %s's employer\?" % _NAME), ["Employer", "Headquarters"]),
+    (re.compile(r"In which year was %s founded\?" % _NAME), ["Founded"]),
+    (re.compile(r"In which city is the headquarters of %s\?" % _NAME), ["Headquarters"]),
 ]
+_OLDER = re.compile(r"How many years older is %s than %s\?" % (_NAME, _NAME))
+_BEFORE = re.compile(r"Was %s born before (\d{4})\?" % _NAME)
+_STAFF = re.compile(r"How many people work for %s\?" % _NAME)
 
 
 def _cards(task):
@@ -292,6 +324,10 @@ def solve_search(task):
                 return None  # punctuation, brackets, "X in Y": not a plain name
             cur = value.lower()
         return ("solved", value)
+    for rx in (_OLDER, _BEFORE, _STAFF):
+        m = rx.fullmatch(sents[1])
+        if m:
+            return _search_special(task, rx, m)
     # "What is the email address of X?": an attribute that no card of the base has at all.
     m = _ANY_ATTR.fullmatch(sents[1])
     if m:
@@ -301,6 +337,44 @@ def solve_search(task):
         attr = _words(m.group(1)) - {"the", "of", "a", "an", "his", "her"}
         if attr and not any(attr & _words(k) for c in cards.values() for k in c):
             return ("infeasible", "no card has a field for %s" % m.group(1))
+    return None
+
+
+def _born(cards, name):
+    card = cards.get(name.lower())
+    v = card.get("Born") if card else None
+    return int(v) if v and re.fullmatch(r"\d{4}", v) else None
+
+
+def _search_special(task, rx, m):
+    """Year arithmetic and head counts over a pure card base; anything unclear -> None."""
+    cards = _cards(task)
+    if not cards:
+        return None
+    if rx is _OLDER:
+        a, b = _born(cards, m.group(1)), _born(cards, m.group(2))
+        if a is None or b is None or b - a <= 0:
+            return None
+        return ("solved", str(b - a))
+    if rx is _BEFORE:
+        a = _born(cards, m.group(1))
+        if a is None:
+            return None
+        return ("solved", "yes" if a < int(m.group(2)) else "no")
+    if rx is _STAFF:
+        company = m.group(1)
+        if company.lower() not in cards:
+            return None
+        n = 0
+        for title, f in cards.items():
+            emp = f.get("Employer")
+            if emp is None:
+                continue
+            if emp.lower() == company.lower():
+                n += 1
+            elif _maybe_same(emp, company):
+                return None  # the company written another way: the model counts
+        return ("solved", str(n)) if n else None
     return None
 
 

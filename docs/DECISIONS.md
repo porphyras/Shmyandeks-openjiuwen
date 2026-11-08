@@ -87,7 +87,7 @@ Real proxy, feasible reward solved / available (ranges over repeated runs of the
 
 | Set | Tasks (infeasible) | What it is | Solved | Units per run |
 |---|---|---|---|---|
-| train_b | 100 (20) | generator in the format of the examples | 233/233 (×3) | 5.1–6.2k; 1.9k with code repair and free infeasible verdicts |
+| train_b | 100 (20) | generator in the format of the examples | 233/233 (×3) | 5.1–6.2k; 1.6k with code repair, free infeasible verdicts and the wider fast path |
 | var80 | 80 (16) | independent generator: paraphrases, other names, TSV | 184/184 | 7–8k |
 | var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs, packages | 141–146/152 | 25–33k |
 | adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–97/99 | ~5k |
