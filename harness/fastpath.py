@@ -63,6 +63,10 @@ _START2 = re.compile(r"An? (warehouse|depot|store|shop) (?:starts with|holds|has
 _QUESTION2 = re.compile(r"How many ([a-z]+) does (?:it|the (warehouse|depot|store|shop)) (?:have|hold) (?:at the end|now)\?")
 _SEQ = re.compile(r"^(?:First|Next|Then|After that|Afterwards|Finally|Later),?\s+", re.I)
 _FRACTION = {"half": 2, "third": 3, "quarter": 4, "fifth": 5}
+# Who the boxes go to or come from: a fixed list, so that a tail that changes the meaning ("to a
+# customer who returns them", "from a supplier that recalls them") never matches.
+_PARTY = (r"(?:a|an|the|its) (?:partner(?: store| warehouse| depot)?|charity|customer|client|shop|store|school|"
+          r"hospital|supplier|depot|retailer|factory|sister warehouse|local [a-z]+ shop)s?")
 _OPS2 = [
     (r"it ships (\d+) box(?:es)? per day for (\d+) days?", lambda x, n, d: x - n * d),
     (r"it receives (\d+) deliver(?:y|ies) of (\d+) box(?:es)? each", lambda x, k, m: x + k * m),
@@ -83,19 +87,19 @@ _OPS2 = [
     (r"it ships (\d+) boxes", lambda x, n: x - n),
     # a plain count of boxes leaving or arriving, in any of the common verbs
     (r"it (?:gives away|donates|sells|loses|throws away|sends away|sends) (\d+) boxes"
-     r"(?: to (?:a|an|the|its) [a-z ]+)?", lambda x, n: x - n),
+     r"(?: to " + _PARTY + ")?", lambda x, n: x - n),
     (r"(\d+) boxes are (?:given away|donated|sold|lost|stolen|thrown away|damaged and thrown away)",
      lambda x, n: x - n),
     (r"it (?:receives|buys|gets|orders and receives) (\d+) (?:more |new |extra )?boxes"
-     r"(?: from (?:a|an|the|its) [a-z ]+)?", lambda x, n: x + n),
+     r"(?: from " + _PARTY + ")?", lambda x, n: x + n),
     (r"(\d+) (?:more |new |extra )?boxes (?:arrive|are delivered|are added to the stock)", lambda x, n: x + n),
-    (r"it (?:sells|gives away|loses|sends away) half of (?:the|its) stock \((?:the number of boxes [a-z ]+ is )?rounded "
+    (r"it (?:sells|gives away|loses|sends away) half of (?:the|its) stock \((?:the number of boxes (?:sold|given away|lost|sent away) is )?rounded "
      r"(up|down)\)", lambda x, ud: x - ((x + 1) // 2 if ud == "up" else x // 2)),
 ]
 _VAGUE2 = [r"a flood destroys part of the stock", r"it ships \d+ boxes per day for (?:several|a few|some) days",
            r"(?:part|some) of the stock is (?:lost|damaged|stolen)",
            r"it (?:gives away|donates|sells|loses|receives|buys|ships) (?:some|a few|several|many) (?:more )?boxes"
-           r"(?: (?:to|from) (?:a|an|the|its) [a-z ]+)?"]
+           r"(?: (?:to|from) " + _PARTY + ")?"]
 
 
 def _variant_clauses(sentence, item, place):
@@ -412,7 +416,7 @@ _CARD_SENT = [
     (r"{T} \(born (\d{4})\) is employed by (.+?)", ("Born", "Employer")),
     (r"{T} is employed by (.+?)", "Employer"),
     (r"{T} is mentored by (.+?)", "Mentor"),
-    (r"(.+?) has been the mentor of {T} for [a-z ]+", "Mentor"),
+    (r"(.+?) has been the mentor of {T} for (?:several|many|a few|two|three|four|five|\d+) years", "Mentor"),
     (r"(.+?) has been the mentor of {T}", "Mentor"),
     (r"Headquartered in (.+?), {T} has been operating since it was founded in (\d{4})", ("Headquarters", "Founded")),
     (r"Founded in (\d{4}), {T} is headquartered in (.+?)", ("Founded", "Headquarters")),
