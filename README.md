@@ -155,8 +155,9 @@ tokens the budget is counted in.
    sets it costs ~20–30 % more tokens on computation tasks only.
 5. **Retry / escalation** only on a failed check: one retry with the error text (and a
    warmer temperature) on the next model of the ladder; a knowledge-base question gets a
-   second, wider look (whole base or more paragraphs, also following the names the first
-   reply reached). Code fixes that still fail get a final pass on the reasoning model (two
+   second look with different text (whole base or retrieved paragraphs, also following the
+   names the first reply reached). A shorter new excerpt is still tried; an identical or
+   empty one is not. Code fixes that still fail get a final pass on the reasoning model (two
    attempts); technical errors are retried at the end. A wrong guess costs nothing, so the
    best available answer is always written — except `DONE` for code, which needs passing tests.
 

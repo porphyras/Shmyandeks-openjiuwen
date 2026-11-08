@@ -525,9 +525,11 @@ class Solver:
                 raw = ""  # a refusal in words ("I cannot do that") is not a guess worth writing
             guess = guess or normalize_answer(raw)
             if attempt == 0:
-                # Second look: the whole base when small, else a wider excerpt.
+                # Second look: the whole base when small, else a different retrieval.
+                # Relevance is not monotonic in length: a shorter excerpt can contain
+                # the missing bridge fact. Do not spend another call on identical text.
                 corpus_all = ctx.kb_fallback_text(task, hint=reply if not info.get("kb_cards", True) else "")
-                if len(corpus_all) > len(excerpt) + 10:
+                if corpus_all and corpus_all != excerpt:
                     excerpt = corpus_all
                     continue
             if unfinished and chain_retry is False and mt < 260:
