@@ -506,9 +506,21 @@ def _cards(task):
             fields.update(more)
         title = lines[0][2:].strip().lower()
         if title in cards:
-            return None  # two cards with one name: ambiguous
+            # Two cards under one name: a field they both give differently is contradictory
+            # (asked for, the task is infeasible); a field given once or alike stays usable.
+            merged = dict(cards[title])
+            for k, v in fields.items():
+                if k in merged and merged[k].strip().lower() != v.strip().lower():
+                    merged[k] = _CONFLICT
+                elif k not in merged:
+                    merged[k] = v
+            cards[title] = merged
+            continue
         cards[title] = fields
     return cards
+
+
+_CONFLICT = "\x00conflict"  # a field two cards of one name give differently
 
 
 # Field names that may carry the same fact under another label: such a card is left to the model.
@@ -552,6 +564,17 @@ def _absent(name, cards, texts, mentioned_ok=False):
     return True
 
 
+def _only_referenced(name, cards, texts):
+    """True when a name without a card of its own occurs in the base only as the exact value of
+    fields of other cards ("Mentor: X", "Z is X's mentor"): nothing about it is stated."""
+    refs = sum(1 for f in cards.values() for v in f.values() if v != _CONFLICT and v.strip().lower() == name.lower())
+    if not refs:
+        return False
+    phrase = re.compile(r"\b%s\b" % r"\W+".join(map(re.escape, name.split())), re.I)
+    mentions = sum(len(phrase.findall(t)) for t in texts)
+    return mentions == refs
+
+
 def _no_such_field(card, field):
     kin = _FIELD_KIN.get(field, (field.lower(),))
     return not any(any(k in key.lower() for k in kin) for key in card)
@@ -575,6 +598,8 @@ def solve_search(task):
         for i, field in enumerate(chain):
             card = cards.get(cur)
             if card is None:
+                if i == 0 and not any(_maybe_same(cur, t) for t in cards) and _only_referenced(m.group(1), cards, texts):
+                    return ("infeasible", "%s has no card; the base only names it in other cards" % m.group(1))
                 if _absent(cur, cards, texts, mentioned_ok=i > 0):
                     # A pure card base holds an entity's facts only in its own card.
                     return ("infeasible", "no card or mention of %s" % (m.group(1) if i == 0 else value))
@@ -584,6 +609,8 @@ def solve_search(task):
                     return ("infeasible", "the card of %s has no %s" % (m.group(1) if i == 0 else value, field))
                 return None
             value = card[field]
+            if value == _CONFLICT:
+                return ("infeasible", "two cards named %s disagree on %s" % (m.group(1) if i == 0 else cur, field))
             if field in ("Born", "Founded"):
                 if not re.fullmatch(r"\d{4}", value):
                     return None  # "12 March 1983", "1983 (Prague)": the model extracts the year
