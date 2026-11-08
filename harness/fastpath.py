@@ -25,9 +25,9 @@ def _sentences(text):
 _START = re.compile(r"A warehouse starts with (\d+|some) boxes\.")
 _QUESTION = re.compile(r"How many boxes does it have at the end\?")
 _OPS = [
-    (re.compile(r"(?:Then it|It) ships (\d+) boxes per day for (\d+) days\."), lambda x, n, d: x - n * d),
-    (re.compile(r"(?:Then it|It) receives (\d+) deliveries of (\d+) boxes each\."), lambda x, k, m: x + k * m),
-    (re.compile(r"(?:Then the stock is|The stock is then) split equally into (\d+) warehouses and it keeps one "
+    (re.compile(r"(?:Then it|It) ships (\d+) box(?:es)? per day for (\d+) days?\."), lambda x, n, d: x - n * d),
+    (re.compile(r"(?:Then it|It) receives (\d+) deliver(?:y|ies) of (\d+) box(?:es)? each\."), lambda x, k, m: x + k * m),
+    (re.compile(r"(?:Then the stock is|The stock is then) split equally into (\d+) warehouses? and it keeps one "
                 r"share \(rounded down\)\."), lambda x, w: x // w),
     (re.compile(r"Then the stock is doubled by merging with a sister warehouse\."), lambda x: 2 * x),
     (re.compile(r"Then the stock is tripled by merging with two sister warehouses of the same size\."),
@@ -37,13 +37,13 @@ _OPS = [
     (re.compile(r"Then the stock grows by (\d+) percent \(rounded down\)\."), lambda x, p: x + (x * p) // 100),
     (re.compile(r"Then it sells half of the stock \(the number of boxes sold is rounded up\)\."),
      lambda x: x - (x + 1) // 2),
-    (re.compile(r"(?:Then it|It) sends (\d+) boxes to each of (\d+) stores\."), lambda x, s, n: x - s * n),
-    (re.compile(r"Customers return (\d+) boxes, which are added back to the stock\."), lambda x, r: x + r),
-    (re.compile(r"(?:Then it|It) ships (\d+) boxes\."), lambda x, n: x - n),
-    (re.compile(r"(?:Then it|It) ships (\d+) boxes and then receives (\d+) boxes\."), lambda x, a, b: x - a + b),
-    (re.compile(r"(?:Then it|It) receives (\d+) deliveries of (\d+) boxes each, but (\d+) boxes in each delivery are "
+    (re.compile(r"(?:Then it|It) sends (\d+) box(?:es)? to each of (\d+) stores?\."), lambda x, s, n: x - s * n),
+    (re.compile(r"Customers return (\d+) box(?:es)?, which (?:are|is) added back to the stock\."), lambda x, r: x + r),
+    (re.compile(r"(?:Then it|It) ships (\d+) box(?:es)?\."), lambda x, n: x - n),
+    (re.compile(r"(?:Then it|It) ships (\d+) box(?:es)? and then receives (\d+) box(?:es)?\."), lambda x, a, b: x - a + b),
+    (re.compile(r"(?:Then it|It) receives (\d+) deliver(?:y|ies) of (\d+) box(?:es)? each, but (\d+) box(?:es)? in each delivery (?:are|is) "
                 r"damaged and thrown away\."), lambda x, k, m, d: x + k * (m - d) if d <= m else None),
-    (re.compile(r"Then it packs the stock into crates of (\d+) boxes, ships all full crates and keeps only the "
+    (re.compile(r"Then it packs the stock into crates of (\d+) box(?:es)?, ships all full crates and keeps only the "
                 r"leftover boxes\."), lambda x, n: x % n),
 ]
 # Quantities the statement never gives: the result cannot be computed exactly (an infeasible
@@ -55,7 +55,7 @@ _VAGUE = [
     re.compile(r"Then the stock is multiplied by merging with (?:a few|several|some) sister warehouses\."),
     re.compile(r"Then it receives all the boxes held by a partner depot\."),
 ]
-_EXACTLY = re.compile(r"After that it has exactly (\d+) boxes\.")
+_EXACTLY = re.compile(r"After that it has exactly (\d+) box(?:es)?\.")
 
 # Other wordings of the same statements (generated variants): a different place or item, words
 # of sequence ("First,", "Next,", "Finally,"), two operations in one sentence (", and").
@@ -64,18 +64,18 @@ _QUESTION2 = re.compile(r"How many ([a-z]+) does (?:it|the (warehouse|depot|stor
 _SEQ = re.compile(r"^(?:First|Next|Then|After that|Afterwards|Finally|Later),?\s+", re.I)
 _FRACTION = {"half": 2, "third": 3, "quarter": 4, "fifth": 5}
 _OPS2 = [
-    (r"it ships (\d+) boxes per day for (\d+) days", lambda x, n, d: x - n * d),
-    (r"it receives (\d+) deliveries of (\d+) boxes each", lambda x, k, m: x + k * m),
-    (r"(\d+) trucks arrive, each carrying (\d+) boxes", lambda x, k, m: x + k * m),
-    (r"(\d+) trucks arrive with (\d+) boxes each", lambda x, k, m: x + k * m),
+    (r"it ships (\d+) box(?:es)? per day for (\d+) days?", lambda x, n, d: x - n * d),
+    (r"it receives (\d+) deliver(?:y|ies) of (\d+) box(?:es)? each", lambda x, k, m: x + k * m),
+    (r"(\d+) trucks? arrives?, each carrying (\d+) box(?:es)?", lambda x, k, m: x + k * m),
+    (r"(\d+) trucks? arrives? with (\d+) box(?:es)? each", lambda x, k, m: x + k * m),
     (r"(?:its|the) stock is doubled (?:again )?(?:by merging with (?:a|another) sister warehouse|after a merger)",
      lambda x: 2 * x),
     (r"it merges with a sister warehouse, which doubles its stock", lambda x: 2 * x),
     (r"(?:its|the) stock is tripled (?:after a merger|by merging with two sister warehouses of the same size)",
      lambda x: 3 * x),
-    (r"(?:its|the) stock is (?:split equally into|divided evenly among) (\d+) warehouses and it keeps (?:one|a single) "
+    (r"(?:its|the) stock is (?:split equally into|divided evenly among) (\d+) warehouses? and it keeps (?:one|a single) "
      r"share \(round(?:ed)? down\)", lambda x, w: x // w),
-    (r"customers return (\d+) boxes(?:, which are added back to the stock)?", lambda x, r: x + r),
+    (r"customers return (\d+) box(?:es)?(?:, which (?:are|is) added back to the stock)?", lambda x, r: x + r),
     (r"it sends one (half|third|quarter|fifth) of its stock \(rounded down\) to a partner (?:store|warehouse)",
      lambda x, f: x - x // _FRACTION[f]),
     (r"(\d+)% of the stock \(rounded down\) is (?:damaged by water and thrown away|lost to damage)",
@@ -103,6 +103,8 @@ def _variant_clauses(sentence, item, place):
     warehouse, split at ', and '."""
     s = _SEQ.sub("", sentence.rstrip("."))
     s = re.sub(r"\b%s\b" % re.escape(item), "boxes", s)
+    if item.endswith("s"):
+        s = re.sub(r"\b%s\b" % re.escape(item[:-1]), "box", s)
     if place != "warehouse":
         s = re.sub(r"\b%ss\b" % place, "warehouses", s)
         s = re.sub(r"\b%s\b" % place, "warehouse", s)
