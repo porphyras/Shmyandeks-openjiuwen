@@ -520,6 +520,9 @@ class Solver:
                     r"\b(how many|how much|difference|older|younger|between|sum|total|number of|count|age|years? (?:after|before|later|earlier))\b",
                     instr, re.I):
                 return Outcome("solved", normalize_answer(raw), "computed from the base")
+            if raw and re.match(r"(?i)(?:i |sorry|unfortunately|there is no|no (?:such|information|data)|"
+                                r"(?:can ?not|can't|unable to|not able to) )", raw):
+                raw = ""  # a refusal in words ("I cannot do that") is not a guess worth writing
             guess = guess or normalize_answer(raw)
             if attempt == 0:
                 # Second look: the whole base when small, else a wider excerpt.
