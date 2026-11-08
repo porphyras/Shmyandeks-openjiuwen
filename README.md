@@ -41,7 +41,15 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   model, a single persistent event loop, `usage_metadata` (input, output, reasoning tokens) read
   from each `AssistantMessage` for the budget ledger;
 - `openjiuwen.core.common.logging.log_config.configure_log_config` to keep the framework's
-  logging off the read-only filesystem and out of stdout.
+  logging off the read-only filesystem and out of stdout;
+- rails (`openjiuwen.core.single_agent.rail`, fired by the SDK's `@rail` decorator around every
+  `Model.invoke`, see `harness/oj_rails.py`): the budget ledger is
+  `openjiuwen.agent_teams.workflow.engine.budget.BudgetLedger` counting in the organisers'
+  units, billed from `after_model_call` the way `SwarmflowBudgetRail` does; the retry policy
+  for a failed call (transport errors, rate limits, outages retried with backoff, a "quota
+  spent" answer stops new calls, a 400/404 fails just that call) is a subclass of
+  `openjiuwen.harness.rails.tool_call_resilience_rail.ToolCallResilienceRail` hooked on
+  `on_model_exception`.
 
 The harness does not use openJiuwen's agents or tool schemas on purpose: every task is solved
 with one compact prompt, and tool schemas or conversation history would multiply the input
@@ -234,7 +242,8 @@ lower the planner's success estimate: the model looks once and may answer `IMPOS
   grader running under another uid can read it.
 - Dependencies: `openjiuwen` pulls in many packages (model SDKs, transformers, vector stores,
   telemetry); they are transitive and unused — the harness imports only
-  `openjiuwen.core.foundation.llm.model` and the logging configuration. All bench runs under
+  `openjiuwen.core.foundation.llm.model`, the logging configuration, the rail base classes
+  and the budget ledger. All bench runs under
   the judge's flags on an `--internal` Docker network showed no outbound attempts other than
   `LLM_BASE_URL`.
 - Task files are untrusted data. Programs the model writes run in a separate process session,

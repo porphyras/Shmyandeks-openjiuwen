@@ -4,6 +4,10 @@ Accounting follows the organizers: cost = prompt_tokens / 10 + completion_tokens
 completion already contains reasoning tokens (verified on the proxy: reasoning is included in
 completion_tokens). If a provider reports reasoning separately and it is larger than the
 completion, the difference is added.
+
+The accounting and the retry policy are openJiuwen rails (harness/oj_rails.py) fired by the
+SDK's `@rail` decorator around every `Model.invoke`; this module keeps the blocking interface
+the solver uses (`chat`, `remaining`, `spent`, `calls`, `by_model`, `exhausted`).
 """
 import asyncio
 import os
@@ -31,6 +35,7 @@ class CallFailed(Exception):
 class LLM:
     def __init__(self, base_url, api_key, budget=None, log=None, loop=None):
         from openjiuwen.core.foundation.llm.model import init_model
+        from harness.oj_rails import CostLedger, ProxyBudgetRail, ProxyResilienceRail, RailedCaller
         self._init_model = init_model
         self.base_url = normalize_base(base_url)
         self.api_key = api_key
@@ -44,11 +49,34 @@ class LLM:
         self.models = {}
         self.rate_wait = 0.0
         self.lock = threading.Lock()
-        self.spent = 0.0
-        self.calls = 0
-        self.exhausted = False
+        self.ledger = CostLedger(total=budget)
         self.consecutive_fail = 0
-        self.by_model = {}
+        self.caller = RailedCaller(self._model)
+        asyncio.run_coroutine_threadsafe(
+            self.caller.register(ProxyBudgetRail(self.ledger),
+                                 ProxyResilienceRail(self.ledger, classify_error, self._try_alt_base, self.log)),
+            self.loop).result(30)
+
+    # the ledger is the single source of these numbers (read by the planner and the trace)
+    @property
+    def spent(self):
+        return self.ledger.spent
+
+    @property
+    def calls(self):
+        return self.ledger.calls
+
+    @property
+    def by_model(self):
+        return self.ledger.by_model
+
+    @property
+    def exhausted(self):
+        return self.ledger.exhausted
+
+    @exhausted.setter
+    def exhausted(self, value):
+        self.ledger.proxy_exhausted = bool(value)
 
     def _model(self, name):
         with self.lock:
@@ -60,31 +88,7 @@ class LLM:
             return m
 
     def remaining(self):
-        return None if not self.budget else self.budget - self.spent
-
-    def _charge(self, model, usage, text_len, max_tokens=None):
-        pin = pout = rt = 0
-        if usage is not None:
-            pin = int(getattr(usage, "input_tokens", 0) or 0)
-            pout = int(getattr(usage, "output_tokens", 0) or 0)
-            rt = int(getattr(usage, "reasoning_tokens", 0) or 0)
-        if not pin and not pout:
-            pout = max(1, text_len // 3)  # usage missing: pessimistic estimate
-            if max_tokens:
-                pout = min(pout, int(max_tokens))  # a completion is never billed past max_tokens
-        extra = max(0, rt - pout)
-        cost = pin / 10.0 + pout + extra
-        with self.lock:
-            self.spent += cost
-            self.calls += 1
-            s = self.by_model.setdefault(model, [0, 0.0])
-            s[0] += 1
-            s[1] += cost
-        return pin, pout, rt, cost
-
-    async def _invoke(self, model, messages, max_tokens, temperature, timeout):
-        m = self._model(model)
-        return await m.invoke(messages, max_tokens=max_tokens, temperature=temperature, timeout=timeout)
+        return self.ledger.remaining()
 
     def chat(self, model, messages, max_tokens, temperature=0.0, timeout=90.0, tag="", max_wait=180.0):
         """Blocking call usable from worker threads (runs on the harness event loop).
@@ -93,47 +97,32 @@ class LLM:
         outages are retried with backoff for up to `max_wait` seconds per call (then the task
         is left for a later pass). Only an explicit "out of quota/budget" answer stops new
         calls, and a 400 context-length error fails just this call."""
+        from openjiuwen.core.single_agent.rail.base import AgentCallbackContext, ModelCallInputs
         if self.exhausted:
             raise BudgetExhausted()
-        last = None
-        give_up = time.time() + max_wait
-        n = 0
-        while True:
-            t0 = time.time()
+        t0 = time.time()
+        ctx = AgentCallbackContext(agent=self.caller, inputs=ModelCallInputs(messages=messages))
+        ctx.extra.update({"tag": tag, "model": model, "give_up": t0 + max_wait})
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                self.caller.model_call(ctx, model, max_tokens, temperature, timeout), self.loop)
             try:
-                coro = self._invoke(model, messages, max_tokens, temperature, timeout)
-                fut = asyncio.run_coroutine_threadsafe(coro, self.loop)
-                try:
-                    msg = fut.result(timeout + 60)
-                except BaseException:
-                    fut.cancel()  # do not keep a proxy slot busy with an abandoned call
-                    raise
-            except Exception as e:  # classify provider errors
-                last = e
-                kind = classify_error(e)
-                n += 1
-                self.log({"ev": "llm_error", "tag": tag, "model": model, "kind": kind,
-                          "err": str(e)[:300], "dt": round(time.time() - t0, 2)})
-                if kind == "budget":
-                    self.exhausted = True
-                    raise BudgetExhausted() from e
-                if kind == "fatal":
-                    if self._try_alt_base(e):
-                        continue
-                    break
-                if time.time() > give_up or self.exhausted:
-                    break
-                time.sleep(min(3.0, 1.0 + n) if kind == "rate" else min(30.0, 2.0 ** min(n, 5)))
-                continue
-            text = msg.content if isinstance(msg.content, str) else str(msg.content or "")
-            reasoning = getattr(msg, "reasoning_content", None) or ""
-            pin, pout, rt, cost = self._charge(model, getattr(msg, "usage_metadata", None), len(text) + len(reasoning),
-                                               max_tokens)
-            self.log({"ev": "llm", "tag": tag, "model": model, "in": pin, "out": pout, "rt": rt,
-                      "cost": round(cost, 1), "spent": round(self.spent, 1), "dt": round(time.time() - t0, 2),
-                      "finish": getattr(msg, "finish_reason", None)})
-            return text, cost, getattr(msg, "finish_reason", None)
-        raise CallFailed(str(last)[:200])
+                msg = fut.result(max_wait + timeout + 60)
+            except BaseException:
+                fut.cancel()  # do not keep a proxy slot busy with an abandoned call
+                raise
+        except Exception as e:
+            if ctx.extra.get("kind") == "budget" or self.exhausted:
+                raise BudgetExhausted() from e
+            raise CallFailed(str(e)[:200])
+        if isinstance(msg, dict):  # refused by the budget rail before the call
+            raise BudgetExhausted()
+        text = msg.content if isinstance(msg.content, str) else str(msg.content or "")
+        pin, pout, rt, cost = ctx.extra["charge"]
+        self.log({"ev": "llm", "tag": tag, "model": model, "in": pin, "out": pout, "rt": rt,
+                  "cost": round(cost, 1), "spent": round(self.spent, 1), "dt": round(time.time() - t0, 2),
+                  "finish": getattr(msg, "finish_reason", None)})
+        return text, cost, getattr(msg, "finish_reason", None)
 
     def _try_alt_base(self, err):
         """A 404 from a base URL given without /v1 (or with /chat/completions): switch once."""
