@@ -370,6 +370,7 @@ _SEARCH_Q = [
     (re.compile(r"What is the founding year of the company where %s works\?" % _NAME), ["Employer", "Founded"]),
     (re.compile(r"Who is the mentor of %s's mentor\?" % _NAME), ["Mentor", "Mentor"]),
     (re.compile(r"Who is %s's mentor\?" % _NAME), ["Mentor"]),
+    (re.compile(r"Who is the mentor of %s\?" % _NAME), ["Mentor"]),
     # two sentences: "X's mentor works for a company. In which city is that company headquartered?"
     (re.compile(r"%s's mentor works for a company\. In which city is that company headquartered\?" % _NAME),
      ["Mentor", "Employer", "Headquarters"]),
