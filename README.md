@@ -312,7 +312,10 @@ The error is dominated by the rare expensive tasks (a reasoning retry of a hard 
 second look at a large prose base); the median task is forecast within a few units. Out of
 sample (later runs of ten sets, 457 tasks that reached the model) the actual cost stayed under
 the p90 bound for 84.7 % of the tasks — coding 83 %, data 84 %, math 83 %, search 90 % — so the
-bound is a little optimistic; tasks settled without the model cost nothing and are excluded.
+bound is a little optimistic; tasks settled without the model cost nothing and are excluded. On
+the independent sets the coverage was 78–83 % on hold-out A (hard, unfamiliar tasks: the
+under-forecasts are the escalations of math and code), 85 % on hold-out B and 100 % on the
+realistic blind batch (MAE 15 units).
 
 Results on the real proxy (organisers' units; feasible reward solved / available; ranges over
 repeated runs of the stable versions of 07.11–08.11):
