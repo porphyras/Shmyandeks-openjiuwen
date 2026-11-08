@@ -102,16 +102,16 @@ olympiad-style math problems.
 Two hold-out sets were built independently from other sources. Only aggregate scores and,
 on a few occasions, generic failure categories ("program crashed", "declared infeasible", "cut
 at the token limit") were fed back — never task texts or answers. Part of the early progress on
-set A came from fixing the categories reported for it. On 09.11 the half of set B written in the
+set A came from fixing the categories reported for it. On 08.11 the half of set B written in the
 examples' format (32 tasks, reward 69) was handed over as training data for the fast path; from
 then on only set A and the other half of B count as blind.
 
 | Hold-out | Versions | Result (feasible reward solved) |
 |---|---|---|
 | A — 60 tasks, reward 142 | successive versions on 07.11 | 77 % → 85 % → 90 % → 98 % → 96 % of feasible tasks |
-| | stable 07.11 ×3 / stable 08.11 ×2 / 09.11 (stable-08d, 08e) | 129–141 / 136–138 / 138, 141 of 142 |
-| B — 64 tasks, reward 140 | stable 07.11 ×3 / stable 08.11 ×2 / 09.11 (stable-08d, 08e) | 125 (all three) / 133–135 / 133, 135 of 140 |
-| B, blind half — 32 tasks, reward 71 | 09.11 (three versions) | 64–68 of 71 |
+| | stable 07.11 ×3 / stable-08 ×2 / stable-08d, 08e (08.11 afternoon) | 129–141 / 136–138 / 138, 141 of 142 |
+| B — 64 tasks, reward 140 | stable 07.11 ×3 / stable-08 ×2 / stable-08d, 08e (08.11 afternoon) | 125 (all three) / 133–135 / 133, 135 of 140 |
+| B, blind half — 32 tasks, reward 71 | 08.11 afternoon (three versions) | 64–68 of 71 |
 
 The fast path rarely fires on these hold-out sets (1 of 60 and 1 of 32 blind tasks): they are
 written in other styles (competition math, table QA, multi-hop QA, small buggy programs); on the
