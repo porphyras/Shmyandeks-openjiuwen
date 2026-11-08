@@ -63,6 +63,7 @@ _START2 = re.compile(r"An? (warehouse|depot|store|shop) (?:starts with|holds|has
 _QUESTION2 = re.compile(r"How many ([a-z]+) does (?:it|the (warehouse|depot|store|shop)) (?:have|hold) (?:at the end|now)\?")
 _SEQ = re.compile(r"^(?:First|Next|Then|After that|Afterwards|Finally|Later),?\s+", re.I)
 _FRACTION = {"half": 2, "third": 3, "quarter": 4, "fifth": 5}
+_NUMWORD = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve".split())}
 # Who the boxes go to or come from: a fixed list, so that a tail that changes the meaning ("to a
 # customer who returns them", "from a supplier that recalls them") never matches.
 _PARTY = (r"(?:a|an|the|its) (?:partner(?: store| warehouse| depot)?|charity|customer|client|shop|store|school|"
@@ -93,6 +94,27 @@ _OPS2 = [
     (r"it (?:receives|buys|gets|orders and receives) (\d+) (?:more |new |extra )?boxes"
      r"(?: from " + _PARTY + ")?", lambda x, n: x + n),
     (r"(\d+) (?:more |new |extra )?boxes (?:arrive|are delivered|are added to the stock)", lambda x, n: x + n),
+    # receipts and shipments on each of several days (no rounding: their order within a day does not matter)
+    (r"(?:every|each) day for (\d+) days?,? it receives (\d+) box(?:es)? and ships (\d+) box(?:es)?",
+     lambda x, d, a, b: x + d * (a - b)),
+    (r"for (\d+) days?,? it receives (\d+) box(?:es)? and ships (\d+) box(?:es)? (?:every|each) day",
+     lambda x, d, a, b: x + d * (a - b)),
+    (r"it receives (\d+) box(?:es)? and ships (\d+) box(?:es)? (?:every|each|per) day for (\d+) days?",
+     lambda x, a, b, d: x + d * (a - b)),
+    (r"(?:every|each) day for (\d+) days?,? (\d+) box(?:es)? arrive and (\d+) box(?:es)? (?:are shipped|leave)",
+     lambda x, d, a, b: x + d * (a - b)),
+    (r"it (?:dispatches|sends out) (\d+) box(?:es)?(?: per day| every day| each day) for (\d+) days?",
+     lambda x, n, d: x - n * d),
+    (r"it (?:dispatches|sends out) (\d+) box(?:es)?", lambda x, n: x - n),
+    (r"(\d+) shipments? of (\d+) box(?:es)? (?:each )?arrives?", lambda x, k, m: x + k * m),
+    (r"(\d+) shipments? arrives?, each (?:with|carrying|containing) (\d+) box(?:es)?", lambda x, k, m: x + k * m),
+    (r"it returns (\d+) box(?:es)? to (?:a|the|its) (?:supplier|manufacturer|factory)", lambda x, n: x - n),
+    (r"(?:its|the) stock (?:doubles|is doubled)", lambda x: 2 * x),
+    (r"(?:its|the) stock (?:triples|is tripled)", lambda x: 3 * x),
+    (r"it (?:sells|gives away|loses|sends away|ships) (?:a|one) (third|quarter|fifth) of (?:the|its) stock "
+     r"\(rounded down\)(?: to " + _PARTY + ")?", lambda x, f: x - x // _FRACTION[f]),
+    (r"(\d+) ?(?:%|percent) of (?:the|its) stock is (?:lost|damaged|stolen|thrown away|lost to damage) \(rounded down\)",
+     lambda x, p: x - x * p // 100),
     (r"it (?:sells|gives away|loses|sends away) half of (?:the|its) stock \((?:the number of boxes (?:sold|given away|lost|sent away) is )?rounded "
      r"(up|down)\)", lambda x, ud: x - ((x + 1) // 2 if ud == "up" else x // 2)),
 ]
@@ -112,6 +134,13 @@ def _variant_clauses(sentence, item, place):
     if place != "warehouse":
         s = re.sub(r"\b%ss\b" % place, "warehouses", s)
         s = re.sub(r"\b%s\b" % place, "warehouse", s)
+    # fixed quantities written in words
+    s = re.sub(r"\bfor a week\b", "for 7 days", s)
+    s = re.sub(r"\bfor (?:two weeks|a fortnight)\b", "for 14 days", s)
+    s = re.sub(r"\ba dozen boxes\b", "12 boxes", s)
+    s = re.sub(r"\b(%s) (?=(?:more |new |extra )?(?:box|boxes|deliveries|delivery|days|day|trucks|truck|shipments|"
+               r"shipment|warehouses|stores)\b)" % "|".join(_NUMWORD), lambda m: str(_NUMWORD[m.group(1).lower()]) + " ",
+               s, flags=re.I)
     return [c.strip() for c in re.split(r",\s+and\s+", s) if c.strip()]
 
 
