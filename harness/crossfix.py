@@ -2,17 +2,30 @@
 
 Code tasks of one generator share functions: the two code examples carry the same functions
 (reverse_words, total, maximum, count_even), each with a different one broken. A variant of
-function f is *verified* when, in the task it comes from, the test named test_f passed on the
-untouched source. A failing task gets, for every failing test_f, the verified variant of f most
-often seen in the other tasks (never its own current version); the replacement is kept only if
-then every visible test passes, else the sources are restored and the task goes to the model.
-Nothing is guessed: a kept variant is source text that already passed its tests elsewhere.
+a function (or of a method, for tests named test_<class>_<method>) is *verified* when, in the
+task it comes from, every test named after it passed on the untouched source. A failing task
+gets, for every failing test, the verified variant most often seen in the other tasks, but only
+when that variant is a small edit of the local broken one (a planted bug is a token or two),
+every name it uses exists in the target module, and then every visible test passes; otherwise
+the sources are restored and the task goes to the model. Nothing is guessed: a kept variant is
+source text that already passed its tests elsewhere. Tasks inspected lazily (after the
+inspection deadline) take no part.
 """
 import ast
+import builtins
 import collections
-import os
+import difflib
+import io
+import re
+import textwrap
+import tokenize
 
 from . import context as ctx
+
+# Size of a fix, in tokens: the examples' planted bugs are 1-2 tokens (-= for +=, sorted for
+# reversed) and carry no docstring; bench generators with docstrings plant bugs of up to ~14.
+MAX_EDIT_TOKENS = 6           # no docstring to vouch for the definition being the same function
+MAX_EDIT_TOKENS_SAME_DOC = 20  # same signature and the same non-empty docstring
 
 
 def _test_names(paths):
@@ -31,49 +44,145 @@ def _test_names(paths):
 
 def _status(info):
     """(passed, failed) test names of the first run on the untouched source, or None when
-    the run gave no per-test result (no "Ran N tests", a crash at import, a timeout)."""
+    the run gave no trustworthy per-test result (no "Ran N tests", a crash at import, a
+    timeout, or a failure count that disagrees with unittest's own summary line)."""
     out = info.get("test_out") or ""
     if "Ran " not in out or "(timeout)" in out or "time budget exhausted" in out:
         return None
     names = _test_names(info.get("tests") or [])
     if not names:
         return None
-    failed = set(ctx.failing_test_names(out))
+    listed = ctx.failing_test_names(out)
+    summary = sum(int(x) for m in re.finditer(r"^FAILED \(([^)]*)\)", out, re.M)
+                  for x in re.findall(r"(?:failures|errors)=(\d+)", m.group(1)))
+    if summary != len(listed):
+        return None  # truncated or unusual output: per-test results cannot be trusted
+    failed = set(listed)
     if failed - names:
         return None  # a failure we cannot attribute
     return names - failed, failed
 
 
 def _defs(text):
-    """{name: (key, source text, (first line, last line))} for top-level functions/classes."""
+    """{name: (key, source, (first line, last line), indent)} for top-level functions and
+    classes and, as "Class.method", for the methods of top-level classes."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
     lines = text.splitlines()
     out = {}
+
+    def add(name, n):
+        first = min([n.lineno] + [d.lineno for d in n.decorator_list])
+        src = "\n".join(lines[first - 1:n.end_lineno])
+        out[name] = (ast.dump(n), src, (first, n.end_lineno), n.col_offset)
+
     for n in tree.body:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            first = min([n.lineno] + [d.lineno for d in n.decorator_list])
-            out[n.name] = (ast.dump(n), "\n".join(lines[first - 1:n.end_lineno]), (first, n.end_lineno))
+            add(n.name, n)
+            if isinstance(n, ast.ClassDef):
+                for b in n.body:
+                    if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        add("%s.%s" % (n.name, b.name), b)
     return out
 
 
 def _owner(test, names):
-    """The definition a test is named after: test_total -> total, test_stack_pop -> Stack,
-    test_safe_div_zero -> safe_div (the longest matching name), or None."""
+    """The definition a test is named after: test_total -> total, test_safe_div_zero ->
+    safe_div (the longest matching name), test_stack_pop -> Stack.pop. A test named after a
+    class but no method of it gives None (a whole class is never swapped)."""
     t = test.lower()
-    hits = [n for n in names if t == "test_" + n.lower() or t.startswith("test_" + n.lower() + "_")]
-    return max(hits, key=len) if hits else None
+
+    def match(prefix, cands):
+        hits = [n for n in cands if t == prefix + n.lower() or t.startswith(prefix + n.lower() + "_")]
+        return max(hits, key=len) if hits else None
+
+    top = match("test_", [n for n in names if "." not in n])
+    if top is None:
+        return None
+    methods = [n.split(".", 1)[1] for n in names if n.startswith(top + ".")]
+    if not methods:
+        return top  # a function
+    m = match("test_%s_" % top.lower(), methods)
+    return "%s.%s" % (top, m) if m else None
 
 
-def _tests_by_def(names_tests, defs):
-    by = collections.defaultdict(set)
-    for test in names_tests:
-        o = _owner(test, defs)
-        if o:
-            by[o].add(test)
-    return by
+def _tokens(src):
+    out = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(textwrap.dedent(src)).readline):
+            if tok.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
+                                tokenize.COMMENT, tokenize.ENDMARKER):
+                out.append(tok.string)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    return out
+
+
+def _edit_size(a, b):
+    """Tokens changed between two definitions (sum over unequal blocks of the longer side)."""
+    ta, tb = _tokens(a), _tokens(b)
+    if ta is None or tb is None:
+        return 10 ** 6
+    sm = difflib.SequenceMatcher(None, ta, tb, autojunk=False)
+    return sum(max(i2 - i1, j2 - j1) for op, i1, i2, j1, j2 in sm.get_opcodes() if op != "equal")
+
+
+def _same_function(a, b):
+    """Max tokens allowed between two variants of one definition, or None if they are not
+    the same function: a planted bug changes the body, never the signature or the docstring."""
+    try:
+        na = ast.parse(textwrap.dedent(a)).body[0]
+        nb = ast.parse(textwrap.dedent(b)).body[0]
+    except (SyntaxError, ValueError, IndexError):
+        return None
+    if ast.dump(na.args) != ast.dump(nb.args):
+        return None
+    da, db = ast.get_docstring(na), ast.get_docstring(nb)
+    if da != db:
+        return None
+    return MAX_EDIT_TOKENS_SAME_DOC if da else MAX_EDIT_TOKENS
+
+
+def _free_names(src):
+    """Names a definition reads that it does not bind itself (parameters, assignments,
+    loop and comprehension targets, inner definitions, local imports)."""
+    try:
+        tree = ast.parse(textwrap.dedent(src))
+    except (SyntaxError, ValueError):
+        return None
+    bound, used = set(), set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name):
+            (used if isinstance(n.ctx, ast.Load) else bound).add(n.id)
+        elif isinstance(n, ast.arg):
+            bound.add(n.arg)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(n.name)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            bound.update((a.asname or a.name).split(".")[0] for a in n.names)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            bound.add(n.name)
+    return used - bound - set(dir(builtins))
+
+
+def _module_names(text):
+    """Names bound at the top level of a module."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return set()
+    names = set()
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(n.name)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            names.update((a.asname or a.name).split(".")[0] for a in n.names)
+        elif isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                names.update(x.id for x in ast.walk(t) if isinstance(x, ast.Name))
+    return names
 
 
 def build_index(pairs):
@@ -89,11 +198,16 @@ def build_index(pairs):
             continue
         passed, failed = st
         alldefs = {}
-        for path, text in (info.get("src_orig") or {}).items():
+        for text in (info.get("src_orig") or {}).values():
             alldefs.update(_defs(text) or {})
-        for name, tests in _tests_by_def(passed | failed, alldefs).items():
+        by = collections.defaultdict(set)
+        for test in passed | failed:
+            o = _owner(test, alldefs)
+            if o:
+                by[o].add(test)
+        for name, tests in by.items():
             if tests and not tests & failed:
-                key, src, _ = alldefs[name]
+                key, src = alldefs[name][0], alldefs[name][1]
                 e = index[name].setdefault(key, [0, src, set()])
                 e[0] += 1
                 e[2].add(task.name)
@@ -101,13 +215,14 @@ def build_index(pairs):
 
 
 def _replace(text, name, new_src):
-    defs = _defs(text)
-    if not defs or name not in defs:
+    d = (_defs(text) or {}).get(name)
+    if d is None:
         return None
-    first, last = defs[name][2]
+    (first, last), indent = d[2], d[3]
+    body = textwrap.indent(textwrap.dedent(new_src), " " * indent)
     lines = text.splitlines()
     tail = "\n" if text.endswith("\n") else ""
-    return "\n".join(lines[:first - 1] + new_src.splitlines() + lines[last:]) + tail
+    return "\n".join(lines[:first - 1] + body.splitlines() + lines[last:]) + tail
 
 
 def repair(solver, task, info, index):
@@ -130,20 +245,25 @@ def repair(solver, task, info, index):
     for test in failed:
         o = _owner(test, names)
         if o is None:
-            return None  # a failing test we cannot tie to a definition: the model's job
+            return None  # a failing test we cannot tie to a function or method: the model's job
         owners.add(o)
     for name in sorted(owners):
         where = [p for p, t in new.items() if name in (_defs(t) or {})]
         if len(where) != 1:
             return None
-        current_key = _defs(new[where[0]])[name][0]
+        cur_key, cur_src = _defs(new[where[0]])[name][:2]
         cands = sorted(((c, k) for k, (c, _, tasks) in index.get(name, {}).items()
-                        if k != current_key and tasks - {task.name}), reverse=True)
-        if not cands:
-            return None
-        if len(cands) > 1 and cands[0][0] == cands[1][0]:
-            return None  # two verified variants equally common: ambiguous
-        replaced = _replace(new[where[0]], name, index[name][cands[0][1]][1])
+                        if k != cur_key and tasks - {task.name}), reverse=True)
+        if not cands or (len(cands) > 1 and cands[0][0] == cands[1][0]):
+            return None  # nothing verified elsewhere, or two variants equally common
+        cand_src = index[name][cands[0][1]][1]
+        limit = _same_function(cur_src, cand_src)
+        if limit is None or _edit_size(cur_src, cand_src) > limit:
+            return None  # not a small fix of this definition: a different function of the same name
+        free = _free_names(cand_src)
+        if free is None or free - _module_names(new[where[0]]):
+            return None  # it relies on a helper this module does not have
+        replaced = _replace(new[where[0]], name, cand_src)
         if replaced is None:
             return None
         new[where[0]] = replaced

@@ -74,10 +74,13 @@ tokens the budget is counted in.
    about half of the tasks. Code tasks are repaired without the model when the same
    functions appear in other code tasks of the run (the two code examples share four
    functions, each with a different one broken): a definition whose own tests passed in another
-   task replaces the broken one, and the replacement is kept only if every visible test then
-   passes. On the bench this fixed 13 of 20 code tasks of train_b and 20 of 20 of a second
-   generator's set, with the hidden tests passing every time and no `DONE` on an unsolvable
-   task; train_b fell from ~5.1k to ~4.0k units. On small sets
+   task replaces the broken one only if it is a small edit of the local definition with the same
+   signature and docstring (a planted bug changes the body, not the specification), every name
+   it uses exists in the target module, a test named after a class method swaps that method
+   only, and every visible test then passes. On the bench this fixed 11 of 20 code tasks of
+   train_b, 20 of 20 of a second generator's set and 9 of 16 of the paraphrased set, with the
+   hidden tests passing every time and no `DONE` on an unsolvable task; train_b fell from ~5.1k
+   to ~4.3k units. On small sets
    (the qualification run) the model path still runs through openJiuwen as a confirmation.
 
 1. **Free inspection (no LLM).** For every task: the instruction is stripped of boilerplate
@@ -281,7 +284,7 @@ repeated runs of the stable versions of 07.11–08.11):
 
 | set | tasks (infeasible) | what it is | solved reward | tokens |
 |---|---|---|---|---|
-| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~4k (fast path, code repair) |
+| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~4.3k (fast path, code repair) |
 | var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
 | var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 141–146/152 (93–96 %) | ~25–33k |
 | adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–97/99 (91–98 %) | ~5k |
