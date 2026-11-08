@@ -1,5 +1,9 @@
 # Shmyandeks — budget-aware task harness on openJiuwen
 
+Developing this repository? Start with [AGENTS.md](AGENTS.md) and the
+[knowledge catalog](docs/knowledge/index.md) for contracts, source ownership and
+verification commands. Search locally with `python3 tools/knowledge.py search QUERY`.
+
 The harness gets a directory of tasks, sees every task and its reward at once, and spends a
 fixed token budget on the tasks that promise the most reward per token. Plain code answers only
 what it can settle with certainty (a statement understood sentence by sentence, a code task
