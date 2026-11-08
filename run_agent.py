@@ -259,10 +259,11 @@ class Run:
             items = list(self.answers.items())
         for d, a in items:
             try:
-                path = os.path.join(d, "answer.txt")
-                cur = open(path, encoding="utf-8", errors="replace").read(2000).strip() if os.path.isfile(path) else None
-                if cur != a.strip()[:1000]:
-                    write_answer(d, a)
+                # Either copy can have been changed independently. Reuse the writer's
+                # path checks and normalization to restore both, even if the root copy
+                # is intact. Reading an untrusted answer could also block on a FIFO.
+                if not write_answer(d, a):
+                    trace({"ev": "write_failed", "dir": d})
             except Exception:
                 pass
 
