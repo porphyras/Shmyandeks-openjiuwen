@@ -495,10 +495,10 @@ def _sentence_fields(title, body):
     return fields
 
 
-def _cards(task):
+def _cards(task, docs=None):
     """{lowercased title: {field: value}} for a base made only of "# Title" + "Key: Value" cards."""
     cards = {}
-    for rel, text in ctx.kb_docs(task):
+    for rel, text in (ctx.kb_docs(task) if docs is None else docs):
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         if not lines or not lines[0].startswith("# "):
             return None
@@ -635,6 +635,8 @@ def _no_such_field(card, field):
 def _walk(task, name, chain):
     """Follow the fields `chain` from the card `name`; ("solved", value) / ("infeasible", why) /
     None (anything unclear: the model looks)."""
+    if "^Mentor" in chain:
+        return _walk_inverse(task, name, chain)
     cards = _cards(task)
     if not cards:
         return None
@@ -666,19 +668,115 @@ def _walk(task, name, chain):
     return ("solved", value)
 
 
+def _inverse_base(task):
+    """A complete, bounded snapshot for inverse queries, where uniqueness is global.
+
+    The ordinary retrieval reader may truncate files. An unseen second mentee must
+    never turn into a supposedly unique answer. Stay within a small markdown-only
+    workspace and decode strictly; anything outside this profile goes to the model.
+    """
+    # Unlike general retrieval, do not silently skip unreadable/symlinked subtrees.
+    def unreadable(error):
+        raise error
+
+    paths, directories = [], 0
+    try:
+        for root, dirs, files in os.walk(task.cwd, onerror=unreadable):
+            directories += 1
+            if directories > 1000 or any(os.path.islink(os.path.join(root, d)) for d in dirs):
+                return None
+            for filename in sorted(files):
+                if filename == "answer.txt" or filename.startswith(".answer.txt"):
+                    continue  # harness output is not a KB document
+                path = os.path.join(root, filename)
+                if os.path.islink(path) or not os.path.isfile(path):
+                    return None
+                paths.append(path)
+                if len(paths) > 1000:
+                    return None
+    except OSError:
+        return None
+    if not paths:
+        return None
+    docs, titles, size = [], {}, 0
+    for path in paths:
+        if os.path.splitext(path)[1].lower() not in (".md", ".markdown"):
+            return None
+        try:
+            with open(path, "rb") as stream:
+                raw = stream.read(65537)
+            size += len(raw)
+            if len(raw) > 65536 or size > 2 * 1024 * 1024:
+                return None
+            text = raw.decode("utf-8").strip()
+        except (OSError, UnicodeError):
+            return None
+        docs.append((os.path.relpath(path, task.cwd), text))
+        title = text.splitlines()[0][2:].strip() if text.startswith("# ") else ""
+        if not re.fullmatch(r"[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*", title):
+            return None
+        titles.setdefault(title.lower(), title)
+    cards = _cards(task, docs)
+    if not cards:
+        return None
+    for card in cards.values():
+        # Unknown labels or contradictions might conceal another matching edge.
+        if set(card) - {"Born", "Employer", "Mentor", "Founded", "Headquarters"}:
+            return None
+        for field, value in card.items():
+            pattern = (r"\d{4}" if field in ("Born", "Founded") else
+                       _NAME if field == "Mentor" else r"[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*")
+            if value == _CONFLICT or not re.fullmatch(pattern, value):
+                return None
+    return cards, titles
+
+
+def _walk_inverse(task, name, chain):
+    """Unique inverse Mentor edges mixed with forward edges; never a free refusal."""
+    base = _inverse_base(task)
+    if base is None:
+        return None
+    cards, titles = base
+    cur, value = name.lower(), name
+    for field in chain:
+        if any(title != cur and _maybe_same(cur, title) for title in cards):
+            return None  # a possible alias makes identity uncertain
+        if field == "^Mentor":
+            matches = []
+            for title, card in cards.items():
+                mentor = card.get("Mentor", "").lower()
+                if mentor == cur:
+                    matches.append(title)
+                elif mentor and _maybe_same(mentor, cur):
+                    return None  # do not silently ignore a possible second match
+            if len(matches) != 1:
+                return None
+            value = titles[matches[0]]
+        else:
+            value = cards.get(cur, {}).get(field)
+            if value is None:
+                return None
+        cur = value.lower()
+    return ("solved", value)
+
+
 # Relation chains of any length, parsed as a whole ("the mentor of X's mentor", "the company that
-# employs the mentor of X"): a person chain is NAME, "P's mentor" or "the mentor of P"; a company
-# chain is "P's employer", "the employer of P", "the company that employs P", "the company P works
-# for" or a company NAME. Anything else does not parse and goes to the model.
+# employs the mentor of X"): a person chain is NAME, "P's mentor", "the mentor of P" or
+# "the person mentored by P". A company chain is "P's employer", "the employer of P",
+# "the company that employs P", "the company P works for" or a company NAME.
+# Anything else does not parse and goes to the model.
 def _person_chain(s):
     s = s.strip()
     if re.fullmatch(_NAME, s):
         return s, []
+    # Prefixes bind the entire expression to their right: "the person mentored
+    # by Alice Wang's mentor" means inverse(forward(Alice)), not forward(inverse(Alice)).
+    for prefix, edge in (("the mentor of ", "Mentor"), ("the person mentored by ", "^Mentor")):
+        if s.startswith(prefix):
+            r = _person_chain(s[len(prefix):])
+            return (r[0], r[1] + [edge]) if r else None
     if s.endswith("'s mentor"):
         r = _person_chain(s[:-len("'s mentor")])
-        return (r[0], r[1] + ["Mentor"]) if r else None
-    if s.startswith("the mentor of "):
-        r = _person_chain(s[len("the mentor of "):])
         return (r[0], r[1] + ["Mentor"]) if r else None
     return None
 
@@ -697,6 +795,8 @@ def _company_chain(s):
 
 
 _CHAIN_Q = [
+    (r"Who is mentored by (.+)\?", _person_chain, "^Mentor"),
+    (r"Who is (the person mentored by .+)\?", _person_chain, None),
     (r"In which year was (.+) born\?", _person_chain, "Born"),
     (r"What is the birth year of (.+)\?", _person_chain, "Born"),
     (r"In what year was (.+) born\?", _person_chain, "Born"),
@@ -720,7 +820,7 @@ def _parse_question(q):
         if m:
             r = parse(m.group(1))
             if r:
-                return r[0], r[1] + [field]
+                return r[0], r[1] + ([field] if field else [])
     return None
 
 

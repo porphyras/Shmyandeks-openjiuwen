@@ -22,17 +22,17 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "9d6fc5b8a2b89db3f4ba5cf084b2c427ee42ba7e8314ab5336d0fbe4e1476d42"
+      "sha256": "39b0c671a78fa3b7bd487b2f0fc8185ccef9e3c09a13772fe362d47629458e80"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "bf5c21379efa6360f33a1a7d4f4c18bedd569a9d282680237d3d632c84042036"
+      "sha256": "68231b1eb908e707362e041ee5107f12574da94246bae2fc60be484f5dea809a"
     },
     {
       "id": "fast",
       "resource": "../../harness/fastpath.py",
-      "sha256": "3c8979d74b20b7ad5ac2bea9570e05350ea3ae91ae62b2d6006135a25ee1d792"
+      "sha256": "01aa40d91bb23ec92a25c48ed08308cefdbfedae23ff6d159a80b05dda7813e2"
     },
     {
       "id": "crossfix",
@@ -58,11 +58,21 @@ call; the required information may already be available locally.[^context]
 The exact prompts, reply parsing, retries and exceptions live in Solver.
 A test-success verdict controls DONE; it is not proof of hidden-test correctness.
 Inspect _run_tests_once when extending supported test styles.[^solver]
+It discovers unittest classes without a main entry point and plain test functions;
+an empty suite cannot establish success. Test contradictions do not infer
+permutation invariance from function names alone.[^solver][^context]
 
 fastpath answers only recognized task forms. A new form must have tests against
 nearby unsupported or ambiguous wording. crossfix reuses definitions that passed
 named tests elsewhere, with signature/docstring/edit-size guards and target tests;
 it is different from guessing a mutation until visible tests pass.[^fast][^crossfix]
+
+Card questions can combine forward Mentor links with a unique inverse link
+("the person mentored by ..."). Inverse chains require a complete, bounded
+markdown snapshot in the task working directory and a supported card schema.
+Ambiguous identities, missing links, unsupported data and read limits fall back
+to the model; this path never returns an infeasible verdict. Small-batch model
+confirmation still follows the normal run policy.[^fast]
 
 See [task lifecycle](task-lifecycle.md) for output placement and
 [testing](testing-and-evidence.md) for positive and negative evidence.
