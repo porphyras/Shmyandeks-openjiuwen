@@ -193,6 +193,37 @@ class RunFaultTests(unittest.TestCase):
         self.assertFalse((self.tasks / "expensive/answer.txt").exists())
         self.assert_answers({"cheap": "42"})
 
+    def test_inverse_search_saves_answers_without_model_and_ambiguity_uses_model(self):
+        from harness.fastpath import _SEARCH_PRE
+        expected = {}
+        # More than 10 tasks: production default leaves qualification confirmation off.
+        for index in range(12):
+            name = "search_%02d" % index
+            task = self.add_task(name)
+            (task / "task.json").write_text(json.dumps({
+                "task_id": name, "task_type": "search", "reward": 1,
+                "instruction": _SEARCH_PRE + " Who is mentored by Mentor Name%d?" % index,
+            }))
+            kb = task / "workspace" / "kb"
+            kb.mkdir()
+            person = "Student Name%d" % index
+            (kb / "student.md").write_text("# %s\nMentor: Mentor Name%d\n" % (person, index))
+            expected[name] = person
+        ambiguous = self.tasks / "search_11" / "workspace" / "kb"
+        (ambiguous / "second.md").write_text("# Another Student\nMentor: Mentor Name11\n")
+
+        def handler(llm, tag, attempt):
+            self.assertEqual(tag, "search_11")
+            # Only routing is under test; no claim that a real model resolves ambiguity.
+            return "ANSWER: Student Name11"
+
+        with patch.dict(os.environ, {"HARNESS_FAST": "1", "HARNESS_CAREFUL_MAX": "10"}):
+            run, fake = self.make_run(handler)
+            run.run()
+        self.assertFalse(run.careful)
+        self.assertEqual(fake.calls, 1)
+        self.assert_answers(expected)
+
 
 if __name__ == "__main__":
     unittest.main()

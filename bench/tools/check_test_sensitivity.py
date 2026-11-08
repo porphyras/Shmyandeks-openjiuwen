@@ -20,6 +20,7 @@ from harness import fastpath  # noqa: E402
 import run_agent  # noqa: E402
 from test_metamorphic import MetamorphicTests  # noqa: E402
 from test_run_faults import RunFaultTests  # noqa: E402
+from test_inverse_search import InverseSearchTests  # noqa: E402
 
 
 def mutations():
@@ -33,6 +34,23 @@ def mutations():
     original_sentences = fastpath._sentences
     original_walk = fastpath._walk
     original_init = run_agent.Run.__init__
+    original_inverse_base = fastpath._inverse_base
+
+    def ignore_second_mentee(task):
+        base = original_inverse_base(task)
+        if base is None:
+            return None
+        cards, titles = base
+        cards.pop("daniel young", None)
+        return cards, titles
+
+    def allow_truncated_base(task):
+        cards = fastpath._cards(task)
+        if not cards:
+            return None
+        titles = {text.splitlines()[0][2:].strip().lower(): text.splitlines()[0][2:].strip()
+                  for _, text in fastpath.ctx.kb_docs(task)}
+        return cards, titles
 
     def no_second_pass(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
@@ -65,6 +83,16 @@ def mutations():
         ("technical errors never get a second pass", RunFaultTests,
          "test_transport_error_does_not_discard_other_tasks_and_gets_second_pass",
          patch.object(run_agent.Run, "__init__", no_second_pass)),
+        ("inverse Mentor edge is followed forward", InverseSearchTests,
+         "test_direction_and_mixed_chains",
+         patch.object(fastpath, "_walk_inverse", lambda task, name, chain:
+                      original_walk(task, name, ["Mentor" if edge == "^Mentor" else edge for edge in chain]))),
+        ("second mentee is ignored", InverseSearchTests,
+         "test_zero_or_multiple_matches_never_answer_or_declare_infeasible",
+         patch.object(fastpath, "_inverse_base", ignore_second_mentee)),
+        ("truncated KB is treated as complete", InverseSearchTests,
+         "test_truncated_unreadable_or_unsupported_documents_fall_back",
+         patch.object(fastpath, "_inverse_base", allow_truncated_base)),
     ]
 
 
