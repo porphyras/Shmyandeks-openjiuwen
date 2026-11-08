@@ -181,6 +181,9 @@ answer without a free check gets an independent second opinion.
   answer stops new calls. Everything solved is already on disk at any moment.
 - Economy mode: when a known budget is less than 1.25× the forecast of the whole queue, second
   opinions and reasoning retries are switched off so that first passes get the budget.
+- A call is never shortened to fit what is left of the budget: a reply cut at `max_tokens` is
+  usually unusable and is still billed. Instead a call whose forecast exceeds the remainder is
+  not made (the task is skipped), and the planner reserves the forecasts of tasks in flight.
 - Replaying the real traces of the bench runs offline under hard budgets
   (`bench/tools/budget_sim.py`, policy vs a 0/1-knapsack oracle that knows every outcome and
   cost in advance): on sets in the examples' format the policy reaches 92–100 % of the oracle
@@ -266,6 +269,10 @@ lower the planner's success estimate: the model looks once and may answer `IMPOS
   and capped output; the key itself is kept out of the harness's process environment and
   redacted from every output. Test files and fixed sources are snapshotted and restored.
 
+Offline regression tests (no model, no proxy) live in `tests/`: `python3 -m unittest discover
+-s tests -v` checks the free answers and verdicts (an unknown wording must go to the model, never
+to a free "infeasible"), the contradiction detector and the final rewrite of answer files.
+
 ## Bench and trajectories
 
 `bench/` holds the local judge replica and training data tools:
@@ -302,7 +309,10 @@ excerpts (650–1600). In-sample quality per kind (organisers' units):
 | search | 160 | 166 | 57 | 49 % | 3.15 |
 
 The error is dominated by the rare expensive tasks (a reasoning retry of a hard code fix, a
-second look at a large prose base); the median task is forecast within a few units.
+second look at a large prose base); the median task is forecast within a few units. Out of
+sample (later runs of ten sets, 457 tasks that reached the model) the actual cost stayed under
+the p90 bound for 84.7 % of the tasks — coding 83 %, data 84 %, math 83 %, search 90 % — so the
+bound is a little optimistic; tasks settled without the model cost nothing and are excluded.
 
 Results on the real proxy (organisers' units; feasible reward solved / available; ranges over
 repeated runs of the stable versions of 07.11–08.11):
