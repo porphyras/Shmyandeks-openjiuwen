@@ -22,6 +22,14 @@ NO_COMMENTS = os.environ.get("HARNESS_NO_COMMENTS", "1") == "1"
 PROSE_ESCALATE = os.environ.get("HARNESS_PROSE_ESCALATE", "0") == "1"
 DATA_EXPR = os.environ.get("HARNESS_DATA_EXPR", "1") == "1"
 CODING_TESTSRC = os.environ.get("HARNESS_CODING_TESTSRC", "0") == "1"
+# Experimental: concise exact edits on the first cheap coding attempt only.
+CODE_EDITS = os.environ.get("HARNESS_CODE_EDITS", "0") == "1"
+
+FUNCTION_REPLY = ("Reply in one ```python block with only the functions you changed (complete definitions). "
+                  "Fix the real bug generally; do not special-case test inputs.")
+EDIT_REPLY = ('Reply ONLY with JSON [["exact old source", "replacement"], ...]. Each old text must match once '
+              'across source files; use ["file.py", "old", "new"] to disambiguate. '
+              'Fix the real bug generally; do not special-case test inputs.')
 
 CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S)
 
@@ -575,27 +583,40 @@ class Solver:
         instr = task.short_instruction()
         out = info.get("test_out", "")
         for attempt in range(2):  # the reasoning rung also gets a second look with the new test log
-            body = (instr + "\n" + self._coding_context(task, srcs, tests, out) +
-                    "\nReply in one ```python block with only the functions you changed (complete definitions). "
-                    "Fix the real bug generally; do not special-case test inputs.")
+            use_edits = CODE_EDITS and level == 0 and attempt == 0
+            body = (instr + "\n" + self._coding_context(task, srcs, tests, out) + "\n" +
+                    (EDIT_REPLY if use_edits else FUNCTION_REPLY))
             msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
             reply = self.ask(task, msgs, level + attempt, 900)
+            merged, tried = {}, None
+            if use_edits:
+                from .edits import EditError, apply_exact_edits
+                paths = {os.path.relpath(p, task.cwd): p for p in files}
+                try:
+                    edited = apply_exact_edits({rel: current[p] for rel, p in paths.items()}, reply)
+                except EditError as e:
+                    # Also accept a normal function reply without paying for another call.
+                    if not extract_code(reply) and not says_impossible(reply):
+                        out += "\nEdit tool rejected reply: " + str(e)
+                        continue  # next attempt uses the original full-function protocol
+                else:
+                    merged = {paths[rel]: text for rel, text in edited.items()}
             code = extract_code(reply)
-            if not code:
+            if not code and not merged:
                 if says_impossible(reply) or (level + attempt >= 2 and not reply.strip()):
                     break  # a refusal, or the reasoning model thought until the cut: no second try
                 continue
             # Each changed definition goes to the file that defines it; new ones to the target.
-            merged = {}
-            elsewhere = set()
-            for p in files[1:]:
-                elsewhere |= _defined_names(current[p])
-            for p in files:
-                m = merge_functions(current[p], code, add_new=(p == target),
-                                    skip_new=elsewhere if p == target else ())
-                if m is not None and m != current[p]:
-                    merged[p] = m
-            tried = self._place_ambiguous_methods(task, info, tests, files, target, elsewhere, current, merged, code)
+            if not merged:
+                elsewhere = set()
+                for p in files[1:]:
+                    elsewhere |= _defined_names(current[p])
+                for p in files:
+                    m = merge_functions(current[p], code, add_new=(p == target),
+                                        skip_new=elsewhere if p == target else ())
+                    if m is not None and m != current[p]:
+                        merged[p] = m
+                tried = self._place_ambiguous_methods(task, info, tests, files, target, elsewhere, current, merged, code)
             if tried:
                 merged, ok, out = tried
             if not merged:

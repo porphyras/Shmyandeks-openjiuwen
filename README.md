@@ -190,6 +190,20 @@ answer without a free check gets an independent second opinion.
   from 1000 units up and the full score from 5000; on the hard sets 54–87 % of the oracle at
   2000–20000 units (adv: 100 % from 5000). Ordering by the p90 forecast beat the median forecast under tight budgets.
 
+## Experimental compact coding edits
+
+`HARNESS_CODE_EDITS=1` requests JSON `[["exact old source", "replacement"], ...]` on the
+first cheap coding attempt instead of complete functions. The local edit tool checks unique
+matches and Python syntax; the existing test verification still decides whether to accept
+the fix. Ambiguous or invalid edits fall back to the original function protocol on the next
+attempt. A full-function reply is also accepted immediately. The mode defaults to **off**;
+retries and reasoning calls retain the original protocol. Models still run through openJiuwen.
+
+`bench/tools/bench_exact_edits.py --set SET --verify [--after-crossfix]` compares reference
+reply sizes and verifies both formats on visible and hidden tests. These are character
+counts of oracle artifacts, **not measured model tokens or model accuracy**. See
+`docs/SKILLS_AND_TOKEN_COST.md` for results, the input overhead and a real-proxy A/B procedure.
+
 ## Infeasible tasks
 
 Detected without spending tokens where possible:
