@@ -76,6 +76,36 @@ except Exception:
 print(_r.item() if hasattr(_r, 'item') else _r)"""
 
 
+# Used only when running a test file as a script did not execute unittest.main().
+# Loading the suite also runs TestCase classes that have no __main__ entry point.
+_DISCOVER_TESTS = """import importlib, inspect, sys, unittest
+sys.path.insert(0, '.')
+module = importlib.import_module(sys.argv[1])
+loader = unittest.TestLoader()
+suite = loader.loadTestsFromModule(module)
+class PlainTests(unittest.TestCase):
+    pass
+def wrap(func):
+    def test(self):
+        value = func()
+        if inspect.isawaitable(value):
+            if inspect.iscoroutine(value):
+                value.close()
+            self.fail('Async test needs an async test runner')
+    return test
+for name in sorted(vars(module)):
+    func = getattr(module, name)
+    if name.startswith('test') and inspect.isfunction(func):
+        setattr(PlainTests, name, wrap(func))
+suite.addTests(loader.loadTestsFromTestCase(PlainTests))
+if not suite.countTestCases():
+    print('No runnable tests discovered', file=sys.stderr)
+    sys.exit(1)
+result = unittest.TextTestRunner().run(suite)
+sys.exit(0 if result.wasSuccessful() else 1)
+"""
+
+
 class Outcome:
     def __init__(self, status, answer=None, note="", code=""):
         self.status = status      # solved | failed | infeasible | error
@@ -259,9 +289,11 @@ class Solver:
             self._remove_test_leftovers(task)
 
     def _run_tests_once(self, task, tests, budget_s):
+        if not tests:
+            return False, "No test files"
         outs, ok = [], True
         t_end = time.time() + budget_s
-        for tp in tests[:5]:
+        for tp in tests:
             left = t_end - time.time()
             if left < 1:
                 ok = False
@@ -271,15 +303,20 @@ class Solver:
                                        timeout=min(30.0, left))
             log = err + out
             if rc == 0 and not re.search(r"^Ran \d+ test", log, re.M):
-                # Not a unittest.main() file (plain test functions): call them ourselves.
-                runner = ("import sys, importlib, traceback; sys.path.insert(0, '.'); t = importlib.import_module(%r); "
-                          "fails = 0\nfor n in sorted(dir(t)):\n    f = getattr(t, n)\n"
-                          "    if n.startswith('test') and callable(f):\n        try:\n            f()\n"
-                          "        except Exception:\n            fails += 1; print('FAIL: ' + n); traceback.print_exc()\n"
-                          "print('Ran %%d tests' %% len([n for n in dir(t) if n.startswith('test')]))\nsys.exit(1 if fails else 0)"
-                          % os.path.splitext(os.path.basename(tp))[0])
-                rc, out2, err2 = sandbox.run([sandbox.PYTHON, "-c", runner], os.path.dirname(tp), timeout=min(30.0, left))
+                # Discover both unittest classes and plain functions; importing a class
+                # definition alone is not evidence that its tests passed.
+                left = t_end - time.time()
+                if left < 1:
+                    ok = False
+                    outs.append("(test time budget exhausted)")
+                    break
+                rc, out2, err2 = sandbox.run(
+                    [sandbox.PYTHON, "-c", _DISCOVER_TESTS, os.path.splitext(os.path.basename(tp))[0]],
+                    os.path.dirname(tp), timeout=min(30.0, left))
                 log = err2 + out2
+            if rc == 0 and not any(int(n) > 0 for n in re.findall(r"^Ran (\d+) test", log, re.M)):
+                ok = False
+                log += "\nNo runnable tests executed"
             if rc != 0:
                 ok = False
             outs.append(log if rc is not None else log + "\n(timeout)")

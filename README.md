@@ -144,7 +144,10 @@ tokens the budget is counted in.
    base class and its overrides all define it, each placement is tried against the tests;
    files a test run creates are removed after it, so every run - and the checker's run of the
    hidden tests on the final workspace - starts from the original file set); knowledge-base answers must occur verbatim in the base (and take its spelling),
-   except numbers computed for counting/difference questions.
+   except numbers computed for counting/difference questions. Test files without a
+   `unittest.main()` entry point are discovered as `TestCase` classes and plain synchronous
+   test functions. Empty suites never count as passing; all test files share the execution
+   deadline (there is no five-file cutoff).
 4. **Second opinion for risky computations.** A computation answer is re-derived by the
    other no-reasoning model when the evidence says the first program may be a shortcut: it
    needed control flow or imports, the statement is long or algebraic, the program contains
