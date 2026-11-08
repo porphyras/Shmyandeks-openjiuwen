@@ -556,6 +556,11 @@ def _off_schema(task, sent):
         cards = _cards(task)
         if not cards or m.group(1).lower() not in cards:
             return None  # not a parsed card base, or no card for the entity: the model looks
+        # Every value must be bare (a year, a plain name, a one-word role): "Born: 1980 in Lima",
+        # "Founded: 1999 by Ann Lee", "Employer: X (since 2015)" may carry the asked fact.
+        bare = re.compile(r"\d{4}|[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*|[a-z]+")
+        if any(v == _CONFLICT or not bare.fullmatch(v.strip()) for c in cards.values() for v in c.values()):
+            return None
         texts = " ".join(t.lower() for _, t in ctx.kb_docs(task))
         keys = " ".join(k.lower() for c in cards.values() for k in c)
         if any(w in texts or w in keys for w in kin):
