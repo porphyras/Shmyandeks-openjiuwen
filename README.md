@@ -321,7 +321,10 @@ Seven blind red-team batches (~330 tasks written "as the organisers might" by a 
 never saw this code) and a reviewer's offline audit of 721 tasks (155 targeted fast-path
 fixtures and 566 tasks from independent generators) are summarised in
 `docs/DECISIONS.md`; on the current stable version no batch shows a wrong answer given without
-the model.
+the model. On the most realistic of them (72 tasks, about 60 % written exactly in the examples'
+forms and 40 % as moderate neighbours, no traps) stable-2026-11-08h solved every feasible task
+(185/185 reward) for 1,298 units — about 1.8k per 100 tasks — with 58 of 72 tasks settled
+without the model and every infeasible math, search and code task recognised for free.
 
 A hold-out set of 60 tasks built by a separate reviewer from other sources was run on
 intermediate versions: 77 % → 85 % → 90 % → 98 % → 96 % of feasible tasks solved (only aggregate

@@ -30,7 +30,7 @@ _OPS = [
     (re.compile(r"(?:Then the stock is|The stock is then) split equally into (\d+) warehouses? and it keeps one "
                 r"share \(rounded down\)\."), lambda x, w: x // w),
     (re.compile(r"Then the stock is doubled by merging with a sister warehouse\."), lambda x: 2 * x),
-    (re.compile(r"Then the stock is tripled by merging with two sister warehouses of the same size\."),
+    (re.compile(r"Then the stock is tripled by merging with two sister warehouses(?: of the same size)?\."),
      lambda x: 3 * x),
     (re.compile(r"Then (\d+) percent of the stock is lost to damage \(the number of lost boxes is rounded down\)\."),
      lambda x, p: x - (x * p) // 100),
@@ -76,7 +76,7 @@ _OPS2 = [
     (r"(?:its|the) stock is doubled (?:again )?(?:by merging with (?:a|another) sister warehouse|after a merger)",
      lambda x: 2 * x),
     (r"it merges with a sister warehouse, which doubles its stock", lambda x: 2 * x),
-    (r"(?:its|the) stock is tripled (?:after a merger|by merging with two sister warehouses of the same size)",
+    (r"(?:its|the) stock is tripled (?:after a merger|by merging with two sister warehouses(?: of the same size)?)",
      lambda x: 3 * x),
     (r"(?:its|the) stock is (?:split equally into|divided evenly among) (\d+) warehouses? and it keeps (?:one|a single) "
      r"share \(round(?:ed)? down\)", lambda x, w: x // w),
