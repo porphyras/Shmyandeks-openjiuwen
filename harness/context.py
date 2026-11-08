@@ -865,6 +865,7 @@ def test_contradictions(src, impure=frozenset()):
                         problems.append("%s expected both %r and %r" % (ast.unparse(call), known[key], val))
                     known.setdefault(key, val)
                     break
+    problems += _raise_contradictions(tree, asserts, known, mods, funcs, impure)
     problems += _self_contradictions(asserts, mods, funcs, impure)
     problems += _object_contradictions(tree, impure)
     if not known:
@@ -905,6 +906,36 @@ def test_contradictions(src, impure=frozenset()):
             if not res:
                 problems.append("%s contradicts required values" % ast.unparse(n)[:120])
     return problems
+
+
+def _raise_contradictions(tree, asserts, known, mods, funcs, impure):
+    """A pure call required to return a value somewhere and to raise somewhere else
+    (assertEqual(f([]), 0) with assertRaises(ValueError, f, []) or a `with assertRaises` block
+    whose only statement is that call)."""
+    raising = []
+    for n in asserts:  # self.assertRaises(Exc, f, *args)
+        if n.func.attr == "assertRaises" and len(n.args) >= 2:
+            raising.append(ast.Call(func=n.args[1], args=list(n.args[2:]), keywords=list(n.keywords)))
+    for w in ast.walk(tree):
+        if not isinstance(w, (ast.With, ast.AsyncWith)) or len(w.body) != 1:
+            continue
+        if not any(isinstance(i.context_expr, ast.Call) and isinstance(i.context_expr.func, ast.Attribute) and
+                   i.context_expr.func.attr in ("assertRaises", "raises") for i in w.items):
+            continue
+        st = w.body[0]
+        val = st.value if isinstance(st, (ast.Expr, ast.Assign)) else None
+        if isinstance(val, ast.Call):
+            raising.append(val)
+    out = []
+    for call in raising:
+        if any(k.arg for k in getattr(call, "keywords", [])):
+            continue  # assertRaises(Exc, f, x, msg=...) and the like: leave it
+        if not _pure_call(call, mods, funcs, impure):
+            continue
+        key = _call_key(call)
+        if key is not None and key in known:
+            out.append("%s must both return %r and raise" % (ast.unparse(call)[:80], known[key]))
+    return out
 
 
 _TYPES = {"int": int, "str": str, "float": float, "list": list, "dict": dict, "tuple": tuple, "bool": bool,

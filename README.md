@@ -200,7 +200,8 @@ zero false verdicts):
   executed — a tiny interpreter evaluates literals, comparisons and a few pure builtins)
   flags the same pure call required to equal two different values (calls compared by their
   evaluated arguments; also `assertAlmostEqual`, `assertIsInstance` with incompatible types,
-  `x > x` on a pure call, or one unchanged object asked for two values), and evaluates the
+  `x > x` on a pure call, one unchanged object asked for two values, or a call required to
+  return a value and also to raise), and evaluates the
   other assertions about those calls with the required values substituted. Functions with
   state — module-level data they change, `self` attributes they change, counters, random or
   time — are never treated as pure. Also: tests importing a module or submodule that exists
