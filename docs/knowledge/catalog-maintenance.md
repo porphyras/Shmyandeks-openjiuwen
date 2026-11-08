@@ -21,7 +21,7 @@
     {
       "id": "tool",
       "resource": "../../tools/knowledge.py",
-      "sha256": "e9c3b1b1ae752e2ec7f8da411af60cd91cc8ccf6038d1fa06481e720fd3cbd32"
+      "sha256": "8b2e0285821404945e7bc5bf8b8d22ad9bcc644994112761d9b0de78d7a1050b"
     },
     {
       "id": "skill",
