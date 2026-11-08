@@ -627,6 +627,98 @@ def _no_such_field(card, field):
     return not any(any(k in key.lower() for k in kin) for key in card)
 
 
+def _walk(task, name, chain):
+    """Follow the fields `chain` from the card `name`; ("solved", value) / ("infeasible", why) /
+    None (anything unclear: the model looks)."""
+    cards = _cards(task)
+    if not cards:
+        return None
+    texts = [t for _, t in ctx.kb_docs(task)]
+    cur = name.lower()
+    value = None
+    for i, field in enumerate(chain):
+        card = cards.get(cur)
+        if card is None:
+            if i == 0 and not any(_maybe_same(cur, t) for t in cards) and _only_referenced(name, cards, texts):
+                return ("infeasible", "%s has no card; the base only names it in other cards" % name)
+            if _absent(cur, cards, texts, mentioned_ok=i > 0):
+                # A pure card base holds an entity's facts only in its own card.
+                return ("infeasible", "no card or mention of %s" % (name if i == 0 else value))
+            return None  # a similar name exists (alias, other order): the model takes a look
+        if field not in card:
+            if _no_such_field(card, field):
+                return ("infeasible", "the card of %s has no %s" % (name if i == 0 else value, field))
+            return None
+        value = card[field]
+        if value == _CONFLICT:
+            return ("infeasible", "two cards named %s disagree on %s" % (name if i == 0 else cur, field))
+        if field in ("Born", "Founded"):
+            if not re.fullmatch(r"\d{4}", value):
+                return None  # "12 March 1983", "1983 (Prague)": the model extracts the year
+        elif not re.fullmatch(r"[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*", value):
+            return None  # punctuation, brackets, "X in Y": not a plain name
+        cur = value.lower()
+    return ("solved", value)
+
+
+# Relation chains of any length, parsed as a whole ("the mentor of X's mentor", "the company that
+# employs the mentor of X"): a person chain is NAME, "P's mentor" or "the mentor of P"; a company
+# chain is "P's employer", "the employer of P", "the company that employs P", "the company P works
+# for" or a company NAME. Anything else does not parse and goes to the model.
+def _person_chain(s):
+    s = s.strip()
+    if re.fullmatch(_NAME, s):
+        return s, []
+    if s.endswith("'s mentor"):
+        r = _person_chain(s[:-len("'s mentor")])
+        return (r[0], r[1] + ["Mentor"]) if r else None
+    if s.startswith("the mentor of "):
+        r = _person_chain(s[len("the mentor of "):])
+        return (r[0], r[1] + ["Mentor"]) if r else None
+    return None
+
+
+def _company_chain(s):
+    s = s.strip()
+    for pre, post in (("", "'s employer"), ("the employer of ", ""), ("the company that employs ", ""),
+                      ("the company ", " works for"), ("the company where ", " works")):
+        if s.startswith(pre) and s.endswith(post) and len(s) > len(pre) + len(post):
+            r = _person_chain(s[len(pre):len(s) - len(post)])
+            if r:
+                return r[0], r[1] + ["Employer"]
+    if re.fullmatch(_NAME, s):
+        return s, []
+    return None
+
+
+_CHAIN_Q = [
+    (r"In which year was (.+) born\?", _person_chain, "Born"),
+    (r"What is the birth year of (.+)\?", _person_chain, "Born"),
+    (r"In what year was (.+) born\?", _person_chain, "Born"),
+    (r"Which company employs (.+)\?", _person_chain, "Employer"),
+    (r"Which company does (.+) work for\?", _person_chain, "Employer"),
+    (r"Who is the employer of (.+)\?", _person_chain, "Employer"),
+    (r"Who is the mentor of (.+)\?", _person_chain, "Mentor"),
+    (r"Who mentors (.+)\?", _person_chain, "Mentor"),
+    (r"In which year was (.+) founded\?", _company_chain, "Founded"),
+    (r"What is the founding year of (.+)\?", _company_chain, "Founded"),
+    (r"In which city is the headquarters of (.+)\?", _company_chain, "Headquarters"),
+    (r"Where is the headquarters of (.+)\?", _company_chain, "Headquarters"),
+    (r"In which city is (.+) headquartered\?", _company_chain, "Headquarters"),
+    (r"Where is (.+) headquartered\?", _company_chain, "Headquarters"),
+]
+
+
+def _parse_question(q):
+    for pat, parse, field in _CHAIN_Q:
+        m = re.fullmatch(pat, q)
+        if m:
+            r = parse(m.group(1))
+            if r:
+                return r[0], r[1] + [field]
+    return None
+
+
 def solve_search(task):
     sents = _sentences(task.short_instruction())
     if len(sents) not in (2, 3) or sents[0] != _SEARCH_PRE:
@@ -634,37 +726,11 @@ def solve_search(task):
     sents = [sents[0], " ".join(sents[1:])]  # a question told in two sentences stays one unit
     for rx, chain in _SEARCH_Q:
         m = rx.fullmatch(sents[1])
-        if not m:
-            continue
-        cards = _cards(task)
-        if not cards:
-            return None
-        texts = [t for _, t in ctx.kb_docs(task)]
-        cur = m.group(1).lower()
-        value = None
-        for i, field in enumerate(chain):
-            card = cards.get(cur)
-            if card is None:
-                if i == 0 and not any(_maybe_same(cur, t) for t in cards) and _only_referenced(m.group(1), cards, texts):
-                    return ("infeasible", "%s has no card; the base only names it in other cards" % m.group(1))
-                if _absent(cur, cards, texts, mentioned_ok=i > 0):
-                    # A pure card base holds an entity's facts only in its own card.
-                    return ("infeasible", "no card or mention of %s" % (m.group(1) if i == 0 else value))
-                return None  # a similar name exists (alias, other order): the model takes a look
-            if field not in card:
-                if _no_such_field(card, field):
-                    return ("infeasible", "the card of %s has no %s" % (m.group(1) if i == 0 else value, field))
-                return None
-            value = card[field]
-            if value == _CONFLICT:
-                return ("infeasible", "two cards named %s disagree on %s" % (m.group(1) if i == 0 else cur, field))
-            if field in ("Born", "Founded"):
-                if not re.fullmatch(r"\d{4}", value):
-                    return None  # "12 March 1983", "1983 (Prague)": the model extracts the year
-            elif not re.fullmatch(r"[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*", value):
-                return None  # punctuation, brackets, "X in Y": not a plain name
-            cur = value.lower()
-        return ("solved", value)
+        if m:
+            return _walk(task, m.group(1), chain)
+    parsed = _parse_question(sents[1])
+    if parsed:
+        return _walk(task, *parsed)
     for rx in (_OLDER, _BEFORE, _STAFF):
         m = rx.fullmatch(sents[1])
         if m:
