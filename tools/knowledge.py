@@ -25,8 +25,11 @@ def contained(root, path):
 
 
 def digest(path):
+    hashed = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            hashed.update(chunk)
+    return hashed.hexdigest()
 
 
 @dataclass
