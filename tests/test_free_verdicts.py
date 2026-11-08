@@ -103,9 +103,10 @@ class ContradictionTests(unittest.TestCase):
         self.assertTrue(self.problems("    def test_a(self):\n        self.assertEqual(m.total([]), 0)\n"
                                       "    def test_b(self):\n        self.assertRaises(ValueError, m.total, [])\n"))
 
-    def test_order_free_function_on_a_permutation(self):
-        self.assertTrue(self.problems("    def test_a(self):\n        self.assertEqual(m.total([1, 2, 3]), 6)\n"
-                                      "    def test_b(self):\n        self.assertEqual(m.total([3, 2, 1]), 5)\n"))
+    def test_different_argument_orders_need_the_model(self):
+        # The function's name alone does not prove that argument order is irrelevant.
+        self.assertEqual(self.problems("    def test_a(self):\n        self.assertEqual(m.total([1, 2, 3]), 6)\n"
+                                       "    def test_b(self):\n        self.assertEqual(m.total([3, 2, 1]), 5)\n"), [])
 
     def test_consistent_tests_are_left_alone(self):
         self.assertEqual(self.problems(

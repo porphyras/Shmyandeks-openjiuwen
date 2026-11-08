@@ -207,12 +207,13 @@ zero false verdicts):
   flags the same pure call required to equal two different values (calls compared by their
   evaluated arguments; also `assertAlmostEqual`, `assertIsInstance` with incompatible types,
   `x > x` on a pure call, one unchanged object asked for two values, a call required to
-  return a value and also to raise, a sum/extreme/count/mean required to differ on two
-  orderings of the same elements, or a relation between calls (`average(xs) == total(xs) /
+  return a value and also to raise, or a relation between calls (`average(xs) == total(xs) /
   len(xs)`) that the values required elsewhere break), and evaluates the
   other assertions about those calls with the required values substituted. Functions with
   state — module-level data they change, `self` attributes they change, counters, random or
-  time — are never treated as pure. Also: tests importing a module or submodule that exists
+  time — are never treated as pure. Different input orderings are never equated by the
+  function name: `maximum_profit`, `total_distance` and `count_switches` can depend on order.
+  Also: tests importing a module or submodule that exists
   nowhere (optional imports inside `try/except ImportError` are ignored), tests reading a
   file nobody creates;
 - programs: a model-written program that divides by zero on a computation, or fails on a
@@ -274,7 +275,9 @@ lower the planner's success estimate: the model looks once and may answer `IMPOS
 
 Offline regression tests (no model, no proxy) live in `tests/`: `python3 -m unittest discover
 -s tests -v` checks the free answers and verdicts (an unknown wording must go to the model, never
-to a free "infeasible"), the contradiction detector and the final rewrite of answer files.
+to a free "infeasible"), the contradiction detector, real subprocess execution of coding tests,
+and the final rewrite of answer files. See `docs/INDEPENDENT_AUDIT.md` for the independent
+audit's counterexamples, validation and trade-offs.
 
 ## Bench and trajectories
 

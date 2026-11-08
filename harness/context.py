@@ -847,7 +847,7 @@ def test_contradictions(src, impure=frozenset()):
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr.startswith("assert"):
             asserts.append(n)
-    known, problems, almost, required = {}, [], {}, []
+    known, problems, almost = {}, [], {}
     for n in asserts:
         if n.func.attr == "assertAlmostEqual" and len(n.args) >= 2 and _pure_call(n.args[0], mods, funcs, impure):
             ok, val = _lit(n.args[1])
@@ -874,10 +874,10 @@ def test_contradictions(src, impure=frozenset()):
                     if key in known and known[key] != val:
                         problems.append("%s expected both %r and %r" % (ast.unparse(call), known[key], val))
                     known.setdefault(key, val)
-                    required.append((call, val))
                     break
     problems += _raise_contradictions(tree, asserts, known, mods, funcs, impure)
-    problems += _order_contradictions(required)
+    # Different permutations are different inputs. A name such as maximum_profit,
+    # total_distance or count_switches cannot prove that their results must match.
     problems += _self_contradictions(asserts, mods, funcs, impure)
     problems += _object_contradictions(tree, impure)
     if not known:
@@ -932,48 +932,6 @@ def test_contradictions(src, impure=frozenset()):
             if not res:
                 problems.append("%s contradicts required values" % ast.unparse(n)[:120])
     return problems
-
-
-# Functions whose result cannot depend on the order of the elements of their one sequence
-# argument: named after a sum, an extreme, a count, a mean or a product, and nothing that
-# points at positions, runs or neighbours.
-_ORDER_FREE = {"sum", "total", "max", "maximum", "min", "minimum", "count", "average", "avg", "mean", "product",
-               "len", "length", "size"}
-_ORDER_BOUND = {"first", "last", "index", "nth", "running", "cumulative", "prefix", "suffix", "position", "top",
-                "reverse", "reversed", "subarray", "sub", "gap", "diff", "difference", "consecutive", "streak",
-                "run", "runs", "window", "pair", "pairs", "adjacent", "sorted", "sort", "rotate", "shift", "after",
-                "before", "until", "while", "longest", "shortest", "k", "n", "change", "changes", "rise", "drop",
-                "increasing", "decreasing", "peak", "peaks", "step", "steps", "weighted", "alternating", "odd_index"}
-
-
-def _order_contradictions(required):
-    """An order-free function (sum/max/count/...) required to give different values on two
-    permutations of the same elements, the other arguments equal."""
-    seen, out = {}, []
-    for call, val in required:
-        name = ast.unparse(call.func).split(".")[-1]
-        words = set(name.lower().split("_"))
-        if not words & _ORDER_FREE or words & _ORDER_BOUND or call.keywords:
-            continue
-        lits = [_lit(a) for a in call.args]
-        if not all(ok for ok, _ in lits):
-            continue
-        vals = [v for _, v in lits]
-        seqs = [i for i, v in enumerate(vals) if isinstance(v, (list, tuple))]
-        if len(seqs) != 1:
-            continue
-        i = seqs[0]
-        try:
-            bag = tuple(sorted(repr(x) for x in vals[i]))
-        except Exception:
-            continue
-        rest = tuple(repr(v) for j, v in enumerate(vals) if j != i)
-        key = (ast.unparse(call.func), i, rest, bag)
-        if key in seen and seen[key][1] != val and list(seen[key][0]) != list(vals[i]):
-            out.append("%s gives %r, but the same elements in another order give %r"
-                       % (ast.unparse(call)[:60], val, seen[key][1]))
-        seen.setdefault(key, (vals[i], val))
-    return out
 
 
 def _raise_contradictions(tree, asserts, known, mods, funcs, impure):
