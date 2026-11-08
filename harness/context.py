@@ -666,6 +666,16 @@ def _ev(n, known):
     if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Add, ast.Sub)):
         a, b = _small(_ev(n.left, known)), _small(_ev(n.right, known))
         return _small(a + b if isinstance(n.op, ast.Add) else a - b)
+    if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Mult, ast.Div, ast.FloorDiv, ast.Mod)):
+        a, b = _ev(n.left, known), _ev(n.right, known)
+        num = (int, float)
+        if not (isinstance(a, num) and isinstance(b, num)) or isinstance(a, bool) or isinstance(b, bool):
+            raise _NoEval()  # numbers only: no sequence repetition, no string formatting
+        if not isinstance(n.op, ast.Mult) and b == 0:
+            raise _NoEval()
+        op = {ast.Mult: lambda x, y: x * y, ast.Div: lambda x, y: x / y,
+              ast.FloorDiv: lambda x, y: x // y, ast.Mod: lambda x, y: x % y}[type(n.op)]
+        return _small(op(a, b))
     if isinstance(n, ast.BoolOp):
         vals = [_ev(v, known) for v in n.values]
         return all(vals) if isinstance(n.op, ast.And) else any(vals)
@@ -875,6 +885,20 @@ def test_contradictions(src, impure=frozenset()):
     for n in asserts:
         attr = n.func.attr
         if attr in ("assertEqual", "assertEquals") and len(n.args) >= 2:
+            a, b = n.args[0], n.args[1]
+            if _has_call(a) and _has_call(b) and not _lit(a)[0] and not _lit(b)[0]:
+                # Calls on both sides (average(xs) == total(xs) / len(xs)): both sides evaluated
+                # with the values other assertions require of those calls.
+                ok1, v1 = _eval_subst(a, known)
+                ok2, v2 = _eval_subst(b, known)
+                if ok1 and ok2:
+                    try:
+                        differ = abs(v1 - v2) > 1e-9 * max(1.0, abs(v1), abs(v2))
+                    except TypeError:
+                        differ = v1 != v2
+                    if differ:
+                        problems.append("%s contradicts required values" % ast.unparse(n)[:120])
+                continue
             for expr, lit in ((n.args[0], n.args[1]), (n.args[1], n.args[0])):
                 okl, val = _lit(lit)
                 if okl and not _pure_call(expr, mods, funcs, impure) and _has_call(expr):

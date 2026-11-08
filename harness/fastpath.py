@@ -106,7 +106,7 @@ _OPS2 = [
     (r"it (?:dispatches|sends out) (\d+) box(?:es)?(?: per day| every day| each day) for (\d+) days?",
      lambda x, n, d: x - n * d),
     (r"it (?:dispatches|sends out) (\d+) box(?:es)?", lambda x, n: x - n),
-    (r"(\d+) shipments? of (\d+) box(?:es)? (?:each )?arrives?", lambda x, k, m: x + k * m),
+    (r"(\d+) (?:shipments?|deliver(?:y|ies)) of (\d+) box(?:es)? (?:each )?arrives?", lambda x, k, m: x + k * m),
     (r"(\d+) shipments? arrives?, each (?:with|carrying|containing) (\d+) box(?:es)?", lambda x, k, m: x + k * m),
     (r"it returns (\d+) box(?:es)? to (?:a|the|its) (?:supplier|manufacturer|factory)", lambda x, n: x - n),
     (r"(?:its|the) stock (?:doubles|is doubled)", lambda x: 2 * x),
@@ -120,6 +120,10 @@ _OPS2 = [
 ]
 _VAGUE2 = [r"a flood destroys part of the stock", r"it ships \d+ boxes per day for (?:several|a few|some) days",
            r"(?:part|some) of the stock is (?:lost|damaged|stolen)",
+           r"(?:several|a few|some|many) (?:deliveries|shipments|trucks) of \d+ box(?:es)? (?:each )?arrive",
+           r"(?:several|a few|some|many) (?:deliveries|shipments|trucks) arrive, each (?:with|carrying|containing) \d+ "
+           r"box(?:es)?",
+           r"it receives (?:deliveries|shipments) of \d+ box(?:es)? each",
            r"it (?:gives away|donates|sells|loses|receives|buys|ships) (?:some|a few|several|many) (?:more )?boxes"
            r"(?: (?:to|from) " + _PARTY + ")?"]
 
