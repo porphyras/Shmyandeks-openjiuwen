@@ -62,7 +62,7 @@ class LLM:
     def remaining(self):
         return None if not self.budget else self.budget - self.spent
 
-    def _charge(self, model, usage, text_len):
+    def _charge(self, model, usage, text_len, max_tokens=None):
         pin = pout = rt = 0
         if usage is not None:
             pin = int(getattr(usage, "input_tokens", 0) or 0)
@@ -70,6 +70,8 @@ class LLM:
             rt = int(getattr(usage, "reasoning_tokens", 0) or 0)
         if not pin and not pout:
             pout = max(1, text_len // 3)  # usage missing: pessimistic estimate
+            if max_tokens:
+                pout = min(pout, int(max_tokens))  # a completion is never billed past max_tokens
         extra = max(0, rt - pout)
         cost = pin / 10.0 + pout + extra
         with self.lock:
@@ -125,7 +127,8 @@ class LLM:
                 continue
             text = msg.content if isinstance(msg.content, str) else str(msg.content or "")
             reasoning = getattr(msg, "reasoning_content", None) or ""
-            pin, pout, rt, cost = self._charge(model, getattr(msg, "usage_metadata", None), len(text) + len(reasoning))
+            pin, pout, rt, cost = self._charge(model, getattr(msg, "usage_metadata", None), len(text) + len(reasoning),
+                                               max_tokens)
             self.log({"ev": "llm", "tag": tag, "model": model, "in": pin, "out": pout, "rt": rt,
                       "cost": round(cost, 1), "spent": round(self.spent, 1), "dt": round(time.time() - t0, 2),
                       "finish": getattr(msg, "finish_reason", None)})

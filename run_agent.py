@@ -103,7 +103,10 @@ class Run:
         self.summary = Summary(args.out or os.environ.get("OUT"))
         # The organisers pass the budget in env BUDGET (e.g. 100000); the proxy does not report
         # what is left, so the harness counts it itself.
-        budget = args.budget or env_float("BUDGET") or env_float("TOKEN_BUDGET")
+        # Not passed at all: the organisers' announced figure, so that the per-call check, the
+        # reasoning cap and economy mode work as on the judge (unlimited only via HARNESS_BUDGET=0).
+        budget = args.budget or env_float("BUDGET") or env_float("TOKEN_BUDGET") or \
+            env_float("HARNESS_BUDGET", 100000.0)
         self.time_limit = args.time_limit or env_float("HARNESS_TIME_LIMIT", 3300.0)
         self.workers = max(1, min(5, args.workers or int(env_float("HARNESS_WORKERS", 5))))
         self.infeasible_answer = os.environ.get("HARNESS_INFEASIBLE_ANSWER", "")

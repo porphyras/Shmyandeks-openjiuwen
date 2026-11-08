@@ -29,7 +29,8 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   byte-code writing is disabled; temporary scripts go to `/tmp`.
 - Arguments are parsed leniently: `--tasks-dir` (or env `TASKS`, default `/data/tasks`),
   optional `--out/--output` (or env `OUT`), the token budget from `--budget`, env `BUDGET`
-  (how the organisers pass it, e.g. `BUDGET=100000`) or env `TOKEN_BUDGET`, in that order;
+  (how the organisers pass it, e.g. `BUDGET=100000`) or env `TOKEN_BUDGET`, in that order, and
+  100000 (the announced figure) when none is given (`HARNESS_BUDGET=0` means unlimited);
   unknown arguments are ignored. The proxy does not report the remainder: the harness counts
   every call the organisers' way and stays within the budget.
 

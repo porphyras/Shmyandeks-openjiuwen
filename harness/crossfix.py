@@ -137,7 +137,13 @@ def _same_function(a, b):
         nb = ast.parse(textwrap.dedent(b)).body[0]
     except (SyntaxError, ValueError, IndexError):
         return None
-    if ast.dump(na.args) != ast.dump(nb.args):
+    if type(na) is not type(nb) or ast.dump(na.args) != ast.dump(nb.args):
+        return None
+    if [ast.dump(d) for d in na.decorator_list] != [ast.dump(d) for d in nb.decorator_list]:
+        return None  # @staticmethod / @property against a plain method: not the same thing
+    ra = ast.dump(na.returns) if na.returns else None
+    rb = ast.dump(nb.returns) if nb.returns else None
+    if ra != rb:
         return None
     da, db = ast.get_docstring(na), ast.get_docstring(nb)
     if da != db:
