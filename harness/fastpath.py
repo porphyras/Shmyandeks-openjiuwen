@@ -298,18 +298,29 @@ def solve_data(task):
     if len(body) != nrows:
         return None
     rows = []
+    whole_prices = True
     try:
         for r in body:
             if len(r) != 6:
                 return None
+            price = r[5].strip()
+            if re.fullmatch(r"\d+", price):
+                price = int(price)
+            elif re.fullmatch(r"\d+\.\d{1,2}", price):
+                whole_prices = False  # 12.50: kept, but questions about prices go to the model
+                price = None
+            else:
+                return None
             rows.append({"order_id": r[0], "region": r[1].strip(), "product": r[2].strip(), "month": int(r[3]),
-                         "units": int(r[4]), "price": int(r[5])})
+                         "units": int(r[4]), "price": price})
     except ValueError:
         return None
     for rx, keep, agg, closing in [(a, b, c, None) for a, b, c in _DATA_Q] + _DATA_Q2:
         m = rx.fullmatch(sents[1])
         if not m:
             continue
+        if not whole_prices and re.search(r"price|revenue", sents[1], re.I):
+            return None  # the answer format of a decimal amount is not stated: the model decides
         if (tail[0] if tail else None) != closing and not (closing == "name" and tail is None):
             return None  # a closing instruction this question does not take (or a missing one)
         # A quoted value that also occurs in another spelling (case, spaces) is ambiguous.
@@ -421,17 +432,21 @@ def _cards(task):
         if not lines or not lines[0].startswith("# "):
             return None
         fields = {}
-        kv = [re.fullmatch(r"([A-Z][\w ]{0,30}):\s*(.+)", l) for l in lines[1:]]
-        if all(kv):
-            for m in kv:
-                key = m.group(1).strip()
+        prose = []
+        for l in lines[1:]:
+            m = re.fullmatch(r"([A-Z][\w ]{0,30}):\s*([^.]+?)\.?", l)
+            if m and not re.search(r"\.\s+[A-Z]", l):  # one "Key: Value" line, not a sentence run-on
+                key = {"Year of birth": "Born", "Mentor at work": "Mentor"}.get(m.group(1).strip(), m.group(1).strip())
                 if key in fields:
                     return None  # the same field twice: ambiguous
                 fields[key] = m.group(2).strip()
-        else:
-            fields = _sentence_fields(lines[0][2:].strip(), lines[1:])
-            if fields is None:
-                return None  # prose beyond the known card sentences: not a card base
+            else:
+                prose.append(l)
+        if prose:
+            more = _sentence_fields(lines[0][2:].strip(), prose)
+            if more is None or set(more) & set(fields):
+                return None  # prose beyond the known card sentences, or a fact stated twice
+            fields.update(more)
         title = lines[0][2:].strip().lower()
         if title in cards:
             return None  # two cards with one name: ambiguous
