@@ -310,11 +310,17 @@ repeated runs of the stable versions of 07.11–08.11):
 | set | tasks (infeasible) | what it is | solved reward | tokens |
 |---|---|---|---|---|
 | train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~1.6k (fast path, code repair) |
-| var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
-| var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 141–146/152 (93–96 %) | ~25–33k |
-| adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–97/99 (91–98 %) | ~5k |
+| alt100 | 100 (20) | second generator in the examples' format | 227/227 (100 %) | ~0.4k |
+| var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7k |
+| var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 141–152/152 (93–100 %) | ~25–33k |
+| adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–99/99 (91–100 %) | ~5k |
 | hard | 116 (16) | GSM-Hard/GSM8K, MBPP with bugs, MuSiQue 2–4 hops, DABench | 269–281/297 (91–95 %) | ~30–40k |
 | math2 | 68 (8) | MATH-500 level 5, GSM8K, SVAMP, ASDiv | 93–96 % | ~25k |
+
+Seven blind red-team batches (~330 tasks written "as the organisers might" by a session that
+never saw this code) and a reviewer's ~720 adversarial fast-path fixtures are summarised in
+`docs/DECISIONS.md`; on the current stable version no batch shows a wrong answer given without
+the model.
 
 A hold-out set of 60 tasks built by a separate reviewer from other sources was run on
 intermediate versions: 77 % → 85 % → 90 % → 98 % → 96 % of feasible tasks solved (only aggregate
