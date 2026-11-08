@@ -356,6 +356,7 @@ class Run:
 
         hlock = threading.Lock()
         retry = []
+        deferred = []  # original queue entries blocked only by in-flight reservations
 
         def one(level, t):
             info = infos.get(t.name)
@@ -371,9 +372,13 @@ class Run:
             with self.lock:
                 rem = self.llm.remaining()
                 if rem is not None and rem - self.reserved < need:
-                    trace({"ev": "skip_budget", "task": t.name, "est": round(need, 1), "remaining": round(rem, 1),
+                    temporary = self.reserved > 0 and rem >= need
+                    trace({"ev": "defer_budget" if temporary else "skip_budget", "task": t.name,
+                           "est": round(need, 1), "remaining": round(rem, 1),
                            "reserved": round(self.reserved, 1)})
-                    return  # cannot afford it next to the tasks in flight; cheaper ones may fit
+                    # A reservation is a forecast, not a charge. Reconsider after the
+                    # active workers finish; a task beyond the actual remainder stays skipped.
+                    return "defer_budget" if temporary else None
                 self.reserved += need
             try:
                 out = self.solver.solve(t, info, level)
@@ -429,11 +434,14 @@ class Run:
                 with hlock:
                     if not heap:
                         return
-                    _, _, level, t = heapq.heappop(heap)
+                    entry = heapq.heappop(heap)
+                    _, _, level, t = entry
                 if self.time_left() < 30 or self.llm.exhausted:
                     return
                 try:
-                    one(level, t)
+                    if one(level, t) == "defer_budget":
+                        with hlock:
+                            deferred.append(entry)
                 except BudgetExhausted:
                     if self.llm.exhausted:
                         STOP.set()
@@ -442,9 +450,22 @@ class Run:
                     trace({"ev": "worker_error", "task": getattr(t, "name", "?"), "err": "%s: %s" % (type(e).__name__, e)})
 
         def pool():
-            with ThreadPoolExecutor(max_workers=self.workers) as ex:
-                for _ in range(self.workers):
-                    ex.submit(worker)
+            while True:
+                with ThreadPoolExecutor(max_workers=self.workers) as ex:
+                    for _ in range(self.workers):
+                        ex.submit(worker)
+                with self.lock:
+                    # No worker owns a reservation now. Float additions/subtractions
+                    # can leave a tiny residual that must not defer another whole wave.
+                    self.reserved = 0.0
+                # All workers have joined: reservations are released and the actual
+                # spend is known. Restore priorities and retry levels, without spinning
+                # on the same entries while another worker still owns their budget.
+                if not deferred or STOP.is_set() or self.llm.exhausted or self.time_left() < 30:
+                    return
+                for entry in deferred:
+                    heapq.heappush(heap, entry)
+                deferred.clear()
 
         pool()
         self.rewrite_answers()
