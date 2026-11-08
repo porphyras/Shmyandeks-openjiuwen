@@ -75,12 +75,19 @@ tokens the budget is counted in.
    (units/revenue/orders/maximum by product, region, month range) after verifying the file,
    its header and its row count, with a non-empty selection; knowledge-base questions over a
    base made only of "# Name" + "Key: Value" cards, following the named fields (born,
-   employer, headquarters, founded, mentor) with every card present. Anything else — an
-   unknown sentence, a missing card, an absent value, an empty selection, a negative stock —
-   goes to the model path below, so a misparse costs tokens, never a wrong answer. Over the
+   employer, headquarters, founded, mentor) with every card present. The same full parse also
+   settles infeasible tasks for free: a stock that the statement never gives ("starts with some
+   boxes", "a few deliveries", "several warehouses") or that contradicts a stated "after that it
+   has exactly N boxes"; a person or company with no card that could be it (no title containing
+   the name's words or contained in them, accents ignored) and no mention of the name anywhere;
+   a card without the asked field or any field like it; an attribute no card has. Anything else
+   — an unknown sentence, a similar name, an absent table value, an empty selection, a negative
+   stock — goes to the model path below, so a misparse costs tokens, never a wrong answer. Over the
    bench runs the fast path gave 1,224 answers on 213 distinct tasks with zero errors (it
    never fires on the paraphrased and hard sets); on sets in the examples' format it covers
-   about half of the tasks. Code tasks are repaired without the model when the same
+   about half of the tasks. Over all bench sets it now answers 277 tasks and declares 65
+   infeasible ones, with no wrong answer and no false verdict (the solvable/unsolvable twins
+   included). Code tasks are repaired without the model when the same
    functions appear in other code tasks of the run (the two code examples share four
    functions, each with a different one broken): a definition whose own tests passed in another
    task replaces the broken one only if it is a small edit of the local definition with the same
@@ -294,7 +301,7 @@ repeated runs of the stable versions of 07.11–08.11):
 
 | set | tasks (infeasible) | what it is | solved reward | tokens |
 |---|---|---|---|---|
-| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~4.3k (fast path, code repair) |
+| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~1.9k (fast path, code repair) |
 | var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
 | var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 141–146/152 (93–96 %) | ~25–33k |
 | adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–97/99 (91–98 %) | ~5k |
