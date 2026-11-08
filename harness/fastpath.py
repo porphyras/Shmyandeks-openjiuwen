@@ -531,6 +531,39 @@ _CONFLICT = "\x00conflict"  # a field two cards of one name give differently
 _FIELD_KIN = {"Born": ("born", "birth"), "Employer": ("employ", "work", "company", "job"),
               "Headquarters": ("headquarter", "hq", "based", "office", "seat", "location", "city"),
               "Founded": ("found", "establish", "since", "year"), "Mentor": ("mentor", "coach", "teacher", "advisor")}
+# Questions about facts outside the card schema (birthplace, job title, founder, start date,
+# chief executive, education), each with the words a card or a sentence would carry if the base
+# did state it. Infeasible only for a fully parsed card base whose entity has a card and in which
+# none of these words occurs anywhere.
+_OFF_SCHEMA = [
+    (r"In which city was %s born\?", ("birthplace", "place of birth", "born in", "hometown", "city of birth", "native")),
+    (r"Where was %s born\?", ("birthplace", "place of birth", "born in", "hometown", "city of birth", "native")),
+    (r"What is %s's job title\?", ("title", "position", "role", "job", "rank")),
+    (r"What position does %s hold\?", ("title", "position", "role", "job", "rank")),
+    (r"Who founded %s\?", ("founder", "founded by", "co-founder", "owner", "established by", "started by")),
+    (r"Who is the founder of %s\?", ("founder", "founded by", "co-founder", "owner", "established by", "started by")),
+    (r"In which year did %s join (?:his|her|their|the) (?:company|employer)\?", ("joined", "since", "hired", "started", "join")),
+    (r"Who is the CEO of %s\?", ("ceo", "chief", "director", "head of", "headed", "president", "manager", "leader", "runs", "led by")),
+    (r"Which university did %s graduate from\?", ("university", "college", "school", "graduat", "degree", "studied", "education", "alma")),
+]
+
+
+def _off_schema(task, sent):
+    for pat, kin in _OFF_SCHEMA:
+        m = re.fullmatch(pat % _NAME, sent)
+        if not m:
+            continue
+        cards = _cards(task)
+        if not cards or m.group(1).lower() not in cards:
+            return None  # not a parsed card base, or no card for the entity: the model looks
+        texts = " ".join(t.lower() for _, t in ctx.kb_docs(task))
+        keys = " ".join(k.lower() for c in cards.values() for k in c)
+        if any(w in texts or w in keys for w in kin):
+            return None
+        return ("infeasible", "the base states nothing like %s" % kin[0])
+    return None
+
+
 # Only attributes a fact-card base never carries (contact details, pay) can be declared absent;
 # any other wording ("the birth year of X") is a paraphrase of a known field and goes to the model.
 _NO_CARD_ATTRS = ("email address", "email", "e-mail address", "phone number", "telephone number",
@@ -626,6 +659,9 @@ def solve_search(task):
         m = rx.fullmatch(sents[1])
         if m:
             return _search_special(task, rx, m)
+    off = _off_schema(task, sents[1])
+    if off is not None:
+        return off
     # "What is the email address of X?": an attribute that no card of the base has at all.
     m = _ANY_ATTR.fullmatch(sents[1])
     if m:
