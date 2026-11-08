@@ -318,7 +318,8 @@ repeated runs of the stable versions of 07.11–08.11):
 | math2 | 68 (8) | MATH-500 level 5, GSM8K, SVAMP, ASDiv | 93–96 % | ~25k |
 
 Seven blind red-team batches (~330 tasks written "as the organisers might" by a session that
-never saw this code) and a reviewer's ~720 adversarial fast-path fixtures are summarised in
+never saw this code) and a reviewer's offline audit of 721 tasks (155 targeted fast-path
+fixtures and 566 tasks from independent generators) are summarised in
 `docs/DECISIONS.md`; on the current stable version no batch shows a wrong answer given without
 the model.
 

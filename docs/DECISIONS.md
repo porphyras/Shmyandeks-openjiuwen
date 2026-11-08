@@ -147,8 +147,8 @@ A separate session generated batches "as the organisers might" without seeing th
 code or its sets, and reported only aggregates and failure categories. Seven batches (b01–b07,
 ~330 tasks, solvable and unsolvable, aimed at the fast path's edges: paraphrases, near-miss
 wordings, changed scopes, long chains and tables of thousands of rows) were run on successive
-versions; categories, never task texts, came back. Together with the reviewer's adversarial
-fixtures (~720 tasks by the end) they exposed two real fast-path defects, both fixed within the
+versions; categories, never task texts, came back. Together with the reviewer's offline audit
+(721 tasks by the end: 155 targeted fast-path fixtures and 566 from independent generators) they exposed two real fast-path defects, both fixed within the
 hour with a regression set: free-text tails accepted in warehouse wordings (three wrong fast
 answers on the reviewer's fixtures, in an untagged version) and a false free "infeasible" on a
 paraphrased card question ("What is the birth year of X?", found by batch b02, present in
