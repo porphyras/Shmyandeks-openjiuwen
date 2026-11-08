@@ -1,8 +1,10 @@
 # Shmyandeks — budget-aware task harness on openJiuwen
 
 The harness gets a directory of tasks, sees every task and its reward at once, and spends a
-fixed token budget on the tasks that promise the most reward per token. Every task is solved
-by the model; plain code only gathers context, runs what the model wrote and checks the result.
+fixed token budget on the tasks that promise the most reward per token. Plain code answers only
+what it can settle with certainty (a statement understood sentence by sentence, a code task
+repaired with functions verified in other tasks); everything else is solved by the model, with
+plain code gathering the context, running what the model wrote and checking the result.
 
 ## Build and run
 
@@ -69,7 +71,13 @@ tokens the budget is counted in.
    goes to the model path below, so a misparse costs tokens, never a wrong answer. Over the
    bench runs the fast path gave 1,224 answers on 213 distinct tasks with zero errors (it
    never fires on the paraphrased and hard sets); on sets in the examples' format it covers
-   about half of the tasks (coding always goes to the model). On small sets
+   about half of the tasks. Code tasks are repaired without the model when the same
+   functions appear in other code tasks of the run (the two code examples share four
+   functions, each with a different one broken): a definition whose own tests passed in another
+   task replaces the broken one, and the replacement is kept only if every visible test then
+   passes. On the bench this fixed 13 of 20 code tasks of train_b and 20 of 20 of a second
+   generator's set, with the hidden tests passing every time and no `DONE` on an unsolvable
+   task; train_b fell from ~5.1k to ~4.0k units. On small sets
    (the qualification run) the model path still runs through openJiuwen as a confirmation.
 
 1. **Free inspection (no LLM).** For every task: the instruction is stripped of boilerplate
@@ -273,7 +281,7 @@ repeated runs of the stable versions of 07.11–08.11):
 
 | set | tasks (infeasible) | what it is | solved reward | tokens |
 |---|---|---|---|---|
-| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~5k (fast path) |
+| train_b | 100 (20) | generator in the examples' format | 233/233 (100 %) | ~4k (fast path, code repair) |
 | var80 | 80 (16) | independent generator: paraphrases, other file/field names, classes, TSV | 184/184 (100 %) | ~7–8k |
 | var2 | 60 (12) | 55–181 KB prose bases, dirty CSVs (cp1251, `;`, "1,250"), packages | 141–146/152 (93–96 %) | ~25–33k |
 | adv | 60 (30) | solvable task + minimally edited unsolvable twin | 90–97/99 (91–98 %) | ~5k |

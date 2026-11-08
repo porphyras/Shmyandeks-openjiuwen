@@ -266,7 +266,7 @@ class Run:
     def run(self):
         from harness.context import load_tasks
         from harness.llm import BudgetExhausted
-        from harness import fastpath
+        from harness import crossfix, fastpath
         from harness.solver import Outcome
 
         tasks = load_tasks(self.tasks_dir)
@@ -278,6 +278,10 @@ class Run:
                "workers": self.workers, "budget": self.llm.budget})
         infos = self.prepare_all(tasks, deadline_s=max(30.0, min(240.0, self.time_left() / 6)))
         self.infos = infos
+        # Functions that passed their tests in one code task, to repair the same functions
+        # broken in another task without the model (harness/crossfix.py).
+        xfix = crossfix.build_index([(t, infos.get(t.name)) for t in tasks]) \
+            if os.environ.get("HARNESS_CROSSFIX", "1") == "1" else {}
         heap, seq = [], itertools.count()
         for t in tasks:
             info = infos.get(t.name)
@@ -301,6 +305,15 @@ class Run:
             if t.kind == "coding" and info.get("initial_pass") and not info.get("problems"):
                 self.finish_task(t, Outcome("solved", "DONE", "tests already pass"))
                 continue
+            if t.kind == "coding" and xfix:
+                try:
+                    fixed = crossfix.repair(self.solver, t, info, xfix)
+                except Exception as e:
+                    fixed = None
+                    trace({"ev": "crossfix_error", "task": t.name, "err": type(e).__name__})
+                if fixed is not None:
+                    self.finish_task(t, fixed)
+                    continue
             fast = fastpath.solve(t, t.kind) if self.fast else None
             if fast is not None:
                 # The whole statement was understood: answered without the model.
