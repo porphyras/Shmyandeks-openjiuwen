@@ -13,7 +13,7 @@ import re
 
 from . import context as ctx
 
-_SENT = re.compile(r"(?<=[.?!])\s+(?=[A-Z])")
+_SENT = re.compile(r"(?<=[.?!])\s+(?=[A-Z0-9])")
 
 
 def _sentences(text):
@@ -81,9 +81,21 @@ _OPS2 = [
     (r"(\d+)% of the stock \(rounded down\) is (?:damaged by water and thrown away|lost to damage)",
      lambda x, p: x - x * int(p) // 100),
     (r"it ships (\d+) boxes", lambda x, n: x - n),
+    # a plain count of boxes leaving or arriving, in any of the common verbs
+    (r"it (?:gives away|donates|sells|loses|throws away|sends away|sends) (\d+) boxes"
+     r"(?: to (?:a|an|the|its) [a-z ]+)?", lambda x, n: x - n),
+    (r"(\d+) boxes are (?:given away|donated|sold|lost|stolen|thrown away|damaged and thrown away)",
+     lambda x, n: x - n),
+    (r"it (?:receives|buys|gets|orders and receives) (\d+) (?:more |new |extra )?boxes"
+     r"(?: from (?:a|an|the|its) [a-z ]+)?", lambda x, n: x + n),
+    (r"(\d+) (?:more |new |extra )?boxes (?:arrive|are delivered|are added to the stock)", lambda x, n: x + n),
+    (r"it (?:sells|gives away|loses|sends away) half of (?:the|its) stock \((?:the number of boxes [a-z ]+ is )?rounded "
+     r"(up|down)\)", lambda x, ud: x - ((x + 1) // 2 if ud == "up" else x // 2)),
 ]
 _VAGUE2 = [r"a flood destroys part of the stock", r"it ships \d+ boxes per day for (?:several|a few|some) days",
-           r"(?:part|some) of the stock is (?:lost|damaged|stolen)"]
+           r"(?:part|some) of the stock is (?:lost|damaged|stolen)",
+           r"it (?:gives away|donates|sells|loses|receives|buys|ships) (?:some|a few|several|many) (?:more )?boxes"
+           r"(?: (?:to|from) (?:a|an|the|its) [a-z ]+)?"]
 
 
 def _variant_clauses(sentence, item, place):
@@ -107,7 +119,7 @@ def _apply_variant(x, clause):
         if m:
             if x is None:
                 return True, None
-            args = [g if g in _FRACTION else int(g) for g in m.groups()]
+            args = [int(g) if g.isdigit() else g for g in m.groups()]
             return True, fn(x, *args)
     return False, x
 
