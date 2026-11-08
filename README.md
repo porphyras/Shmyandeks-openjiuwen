@@ -85,9 +85,9 @@ tokens the budget is counted in.
    stock — goes to the model path below, so a misparse costs tokens, never a wrong answer. Over the
    bench runs the fast path gave 1,224 answers on 213 distinct tasks with zero errors (it
    never fires on the paraphrased and hard sets); on sets in the examples' format it covers
-   about half of the tasks. Over all bench sets it now answers 277 tasks and declares 65
-   infeasible ones, with no wrong answer and no false verdict (the solvable/unsolvable twins
-   included). Code tasks are repaired without the model when the same
+   about half of the tasks. Over all bench sets (subsets counted separately) it now answers 383
+   task instances and declares 65 infeasible, with no wrong answer and no false verdict (the
+   solvable/unsolvable twins included). Code tasks are repaired without the model when the same
    functions appear in other code tasks of the run (the two code examples share four
    functions, each with a different one broken): a definition whose own tests passed in another
    task replaces the broken one only if it is a small edit of the local definition with the same
