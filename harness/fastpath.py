@@ -124,6 +124,11 @@ _VAGUE2 = [r"a flood destroys part of the stock", r"it ships \d+ boxes per day f
            r"(?:several|a few|some|many) (?:deliveries|shipments|trucks) arrive, each (?:with|carrying|containing) \d+ "
            r"box(?:es)?",
            r"it receives (?:deliveries|shipments) of \d+ box(?:es)? each",
+           # an end left vague ("until the stock is low") or a split with no number of parts
+           r"it ships \d+ box(?:es)? (?:per|every|each) day until (?:the|its) stock (?:is|runs|gets) "
+           r"(?:low|very low|almost empty|nearly empty)",
+           r"(?:its|the) stock is (?:split equally|divided evenly) (?:among|between) (?:the|its) sister warehouses and "
+           r"it keeps (?:one|a single) share(?: \(round(?:ed)? down\))?",
            r"it (?:gives away|donates|sells|loses|receives|buys|ships) (?:some|a few|several|many) (?:more )?boxes"
            r"(?: (?:to|from) " + _PARTY + ")?"]
 
