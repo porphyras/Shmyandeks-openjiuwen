@@ -389,6 +389,15 @@ _SEARCH_Q = [
     (re.compile(r"Who is the mentor of %s's mentor\?" % _NAME), ["Mentor", "Mentor"]),
     (re.compile(r"Who is %s's mentor\?" % _NAME), ["Mentor"]),
     (re.compile(r"Who is the mentor of %s\?" % _NAME), ["Mentor"]),
+    (re.compile(r"What is the birth year of %s\?" % _NAME), ["Born"]),
+    (re.compile(r"In what year was %s born\?" % _NAME), ["Born"]),
+    (re.compile(r"(?:What|Which) year was %s born(?: in)?\?" % _NAME), ["Born"]),
+    (re.compile(r"In what year was %s founded\?" % _NAME), ["Founded"]),
+    (re.compile(r"What is the founding year of %s\?" % _NAME), ["Founded"]),
+    (re.compile(r"Where is %s headquartered\?" % _NAME), ["Headquarters"]),
+    (re.compile(r"Where is the headquarters of %s\?" % _NAME), ["Headquarters"]),
+    (re.compile(r"Who employs %s\?" % _NAME), ["Employer"]),
+    (re.compile(r"For which company does %s work\?" % _NAME), ["Employer"]),
     # two sentences: "X's mentor works for a company. In which city is that company headquartered?"
     (re.compile(r"%s's mentor works for a company\. In which city is that company headquartered\?" % _NAME),
      ["Mentor", "Employer", "Headquarters"]),
@@ -477,7 +486,11 @@ def _cards(task):
 _FIELD_KIN = {"Born": ("born", "birth"), "Employer": ("employ", "work", "company", "job"),
               "Headquarters": ("headquarter", "hq", "based", "office", "seat", "location", "city"),
               "Founded": ("found", "establish", "since", "year"), "Mentor": ("mentor", "coach", "teacher", "advisor")}
-_ANY_ATTR = re.compile(r"What is the ([a-z][a-z ]{1,30}) of %s\?" % _NAME)
+# Only attributes a fact-card base never carries (contact details, pay) can be declared absent;
+# any other wording ("the birth year of X") is a paraphrase of a known field and goes to the model.
+_NO_CARD_ATTRS = ("email address", "email", "e-mail address", "phone number", "telephone number",
+                  "mobile number", "salary", "home address", "postal address")
+_ANY_ATTR = re.compile(r"What is the (%s) of %s\?" % ("|".join(re.escape(a) for a in _NO_CARD_ATTRS), _NAME))
 
 
 def _words(s):
