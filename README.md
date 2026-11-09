@@ -243,7 +243,11 @@ it from what the free inspection already measured; it never needs a call to lear
   supporting paragraphs for 2 / 3 / 4 hops, against 71–74 % for any single-round ranking (BM25,
   TF-IDF, character n-grams, their rank fusion); `bench/tools/retrieval_compare.py`. A third
   round (names found in the second) traded 7 points of complete recall on 2-hop questions for 5
-  on 3–4 hops under the same limit, so the two rounds stay.
+  on 3–4 hops under the same limit, so the two rounds stay. Character 3–5-gram TF-IDF in both
+  rounds found more supporting quotes on a labelled set with abbreviated and varied names (60 →
+  73 % on one hop, 57 → 71 % on three) yet scored lower on the real proxy (46–48 vs 52–54 of 73
+  there, 33 vs 36–41 of 41 on large prose bases): the extra paragraphs it brings are near
+  namesakes that mislead the model. Whole-word BM25 stays; `bench/tools/retrieval_r01.py`.
 - **Under a budget** (offline replay of real traces, `bench/tools/budget_sim.py`): on the hard set,
   which costs ~33k units unlimited, the policy reaches 79 / 88 / 98 / 100 % of a 0/1-knapsack
   oracle that knows every outcome at 10k / 20k / 30k / 40k units.
