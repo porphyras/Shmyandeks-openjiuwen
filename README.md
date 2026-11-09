@@ -197,6 +197,41 @@ answer without a free check gets an independent second opinion.
   from 1000 units up and the full score from 5000; on the hard sets 54–87 % of the oracle at
   2000–20000 units (adv: 100 % from 5000). Ordering by the p90 forecast beat the median forecast under tight budgets.
 
+## Estimating task cost in tokens
+
+The organisers' rewards are random and unrelated to difficulty, so the order of work is
+`reward × p(success) / cost`, and the cost must be known before any call. The harness forecasts
+it from what the free inspection already measured; it never needs a call to learn it.
+
+- **Features (before any call):** the kind of task and the size of the context the solver will
+  send (characters of the table summary, knowledge-base excerpt, source and test log); a large
+  prose base read as paragraphs gets ×2.5 (one to three looks). Tasks the fast path or the code
+  repair settle cost 0 and are not queued at all; free infeasible verdicts cost 0 too.
+- **Model:** per kind `cost = max(floor, a + b × chars)`, fitted by least absolute deviations
+  (the median forecast) on 664 tasks of real-proxy trajectories of 07.11, retries, second
+  opinions and escalations included; an upper bound `p90 = forecast × q90(actual / forecast)`.
+  `bench/tools/fit_cost.py` fits it, `bench/tools/refit_cost.py` refits and evaluates it.
+- **Quality out of sample** (tasks that reached the model, all collected after the fit):
+
+  | Evaluation set | Tasks | actual ≤ p90 | MAE (units) |
+  |---|---|---|---|
+  | later bench runs of ten sets | 457 | 84.7 % | coding 279, data 66, math 83, search 84 |
+  | blind red-team batches b01–b08 | 476 | 85.5 % | 80 |
+  | hold-out B, 12 runs of successive versions | 644 | 87.6 % | 114 |
+  | hold-out A (hard, unfamiliar) | 118 | 78–83 % | 181–199 |
+  | the realistic blind batch | 14 | 100 % | 15 |
+
+  The bound is a little optimistic where math and code escalate (a second opinion, a reasoning
+  retry): those calls are decided by what the first answer shows, not by the context size.
+- **Refitting on all traces did not help:** fitted on the bench plus one external source and
+  tested on the other, the refit kept the coverage within 0.1 point (87.6 → 87.7 % on hold-out B,
+  85.5 → 85.5 % on the red-team batches) and the MAE within 2 %; recalibrating only the p90
+  factors moved it by under a point. The remaining error is the escalations, so the 07.11
+  forecast stays.
+- **Use:** the order of the queue; the reserve for tasks in flight; economy mode when a known
+  budget is below 1.25× the queue's forecast; a call whose forecast exceeds the remainder is
+  not made. Every forecast and the actual spend are written to `token_estimates.json`.
+
 ## Infeasible tasks
 
 Detected without spending tokens where possible:
