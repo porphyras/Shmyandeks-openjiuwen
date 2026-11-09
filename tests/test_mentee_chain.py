@@ -26,6 +26,9 @@ class MenteeChainTests(unittest.TestCase):
         self.assertEqual(self.solve("Where is the headquarters of the employer of Alice Wang's mentee's mentee?"),
                          ("solved", "Graz"))
 
+    def test_back_to_the_mentor(self):
+        self.assertEqual(self.solve("Who is Alice Wang's mentee's mentor?"), ("solved", "Alice Wang"))
+
     def test_two_candidates_go_to_the_model(self):
         cards = dict(CARDS, **{"kb/f.md": "# Fedor Sato\n\nBorn: 1975\nEmployer: Cobalt Works\nMentor: Alice Wang\n"})
         self.assertIsNone(self.solve("In which year was Alice Wang's mentee's mentee born?", cards))

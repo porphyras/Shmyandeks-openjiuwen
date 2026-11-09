@@ -801,6 +801,7 @@ _CHAIN_Q = [
     (r"Who is (the person mentored by .+)\?", _person_chain, None),
     (r"Who is (the mentee of .+)\?", _person_chain, None),
     (r"Who is (.+'s mentee)\?", _person_chain, None),
+    (r"Who is (.+'s mentor)\?", _person_chain, None),
     (r"In which year was (.+) born\?", _person_chain, "Born"),
     (r"What is the birth year of (.+)\?", _person_chain, "Born"),
     (r"In what year was (.+) born\?", _person_chain, "Born"),
