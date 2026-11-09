@@ -10,6 +10,13 @@ what it can settle with certainty (a statement understood sentence by sentence, 
 repaired with functions verified in other tasks); everything else is solved by the model, with
 plain code gathering the context, running what the model wrote and checking the result.
 
+The deterministic fast path below is an accelerator for statements written in the examples'
+forms; it is never relied on for the score. The general path (inspection, one short model call,
+a free check) carries everything else and was measured on four independent sets of a different
+nature: hold-out A (competition and word math, table QA, multi-hop QA, small packages with bugs)
+138–141 of 142, hold-out B, blind red-team batches and the hard bench set (GSM-Hard, MBPP,
+MuSiQue, DABench).
+
 ## Build and run
 
 ```bash
@@ -228,6 +235,16 @@ it from what the free inspection already measured; it never needs a call to lear
   85.5 → 85.5 % on the red-team batches) and the MAE within 2 %; recalibrating only the p90
   factors moved it by under a point. The remaining error is the escalations, so the 07.11
   forecast stays.
+- **Retrieval for large prose bases** was measured the same way, offline: on MuSiQue questions
+  with their supporting paragraphs among 200 (limit 9,000 characters), the harness's two rounds
+  of BM25 (the question, then the names the first paragraphs mention) found 90 / 73 / 75 % of the
+  supporting paragraphs for 2 / 3 / 4 hops, against 71–74 % for any single-round ranking (BM25,
+  TF-IDF, character n-grams, their rank fusion); `bench/tools/retrieval_compare.py`. A third
+  round (names found in the second) traded 7 points of complete recall on 2-hop questions for 5
+  on 3–4 hops under the same limit, so the two rounds stay.
+- **Under a budget** (offline replay of real traces, `bench/tools/budget_sim.py`): on the hard set,
+  which costs ~33k units unlimited, the policy reaches 79 / 88 / 98 / 100 % of a 0/1-knapsack
+  oracle that knows every outcome at 10k / 20k / 30k / 40k units.
 - **Use:** the order of the queue; the reserve for tasks in flight; economy mode when a known
   budget is below 1.25× the queue's forecast; a call whose forecast exceeds the remainder is
   not made. Every forecast and the actual spend are written to `token_estimates.json`.

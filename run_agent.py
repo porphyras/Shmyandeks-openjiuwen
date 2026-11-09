@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import argparse  # noqa: E402
 import heapq  # noqa: E402
+import math  # noqa: E402
 import itertools  # noqa: E402
 import json  # noqa: E402
 import signal  # noqa: E402
@@ -43,6 +44,8 @@ LADDERS = {
 PRIOR_P = {"math": 0.95, "data": 0.97, "search": 0.97, "coding": 0.97}
 COST_FIT = {"math": (67.5, 0.1191, 40.1, 1.78), "data": (13.8, 0.1086, 30.5, 1.95),
             "search": (18.1, 0.0285, 19.2, 3.15), "coding": (-34.4, 0.1178, 49.5, 1.94)}
+# search: log(cost) = a + b*log(1+chars) + c*prose for the median, then the same for the p90
+SEARCH_FIT = (-1.234, 0.75, 0.1, 2.499, 0.375, 0.6)
 REASONING_MAX_TOKENS = 1500
 
 
@@ -175,13 +178,19 @@ class Run:
     def estimate(self, task, info):
         """(p_success, expected cost) before any call; logged next to the actual spend."""
         kind = info.get("kind", "math")
-        a, b, floor, _p90 = COST_FIT.get(kind, (60.0, 0.1, 40, 2.0))
+        a, b, floor, p90x = COST_FIT.get(kind, (60.0, 0.1, 40, 2.0))
         cost = max(floor, a + b * info.get("ctx_chars", 0))
-        if kind == "search" and not info.get("kb_cards", True) and not info.get("kb_complete", True):
-            # A large prose base seen as paragraphs: one call when the first excerpt holds the
-            # answer (~280 on var2), else two or three looks with 12k-character excerpts (650-1600);
-            # the linear fit above only sees the first excerpt.
-            cost *= 2.5
+        info["cost_p90"] = cost * p90x
+        if kind == "search":
+            # Knowledge-base questions: a log-log model (median and 90th percentile, pinball loss)
+            # with a term for prose bases, fitted on 1.1k model-path tasks of the bench, the blind
+            # red-team batches and hold-out B; out of sample it cut the error on search from 225 to
+            # 19 units on hold-out B and from 54 to 52 on later bench runs, coverage kept
+            # (bench/tools/refit_cost.py). The linear fit with a x2.5 for prose overshot.
+            x = math.log1p(info.get("ctx_chars", 0))
+            prose = 0.0 if info.get("kb_cards", True) else 1.0
+            cost = math.exp(SEARCH_FIT[0] + SEARCH_FIT[1] * x + SEARCH_FIT[2] * prose)
+            info["cost_p90"] = max(cost, math.exp(SEARCH_FIT[3] + SEARCH_FIT[4] * x + SEARCH_FIT[5] * prose))
         p = PRIOR_P.get(kind, 0.6)
         if info.get("problems"):
             p *= 0.05
@@ -300,7 +309,7 @@ class Run:
             p, c = self.estimate(t, info)
             info["p"], info["cost"] = p, c
             self.estimates[t.name] = {"task_id": t.id, "kind": t.kind, "estimate": round(c, 1),
-                                      "estimate_p90": round(c * COST_FIT.get(t.kind, (0, 0, 0, 2.0))[3], 1),
+                                      "estimate_p90": round(info.get("cost_p90", c * 2.0), 1),
                                       "p_success": round(p, 3), "ctx_chars": info.get("ctx_chars", 0),
                                       "prose": t.kind == "search" and not info.get("kb_cards", True)}
             if info.get("problems") and t.kind != "coding" and not self.careful:
@@ -333,7 +342,7 @@ class Run:
                 continue
             # Ordered by reward per risk-aware cost (the p90 forecast): under a tight budget this
             # beat the median forecast in the offline replay of real traces (bench/tools/budget_sim.py).
-            p90 = c * COST_FIT.get(t.kind, (0, 0, 0, 2.0))[3]
+            p90 = info.get("cost_p90", c * 2.0)
             heapq.heappush(heap, (-(t.reward * p / max(p90, 1.0)), next(seq), 0, t))
         self.summary.record_estimates(self.estimates)
         trace({"ev": "estimates", "items": self.estimates})
