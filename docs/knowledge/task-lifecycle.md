@@ -21,7 +21,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "855bc3de3640d3582942a4ec55defbb034665fa51f0c6ecb83e9bc6c7fd66609"
+      "sha256": "d026fec146ee178f5c97a4edcbe643e8ebaefaf08cb8fd0f71601a8b63f41ef7"
     },
     {
       "id": "context",

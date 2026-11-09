@@ -21,7 +21,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "855bc3de3640d3582942a4ec55defbb034665fa51f0c6ecb83e9bc6c7fd66609"
+      "sha256": "d026fec146ee178f5c97a4edcbe643e8ebaefaf08cb8fd0f71601a8b63f41ef7"
     },
     {
       "id": "llm",
@@ -56,8 +56,9 @@ success probability and the p90 factor. ask checks affordability again.[^run]
 
 Reservations represent forecast cost of active tasks. Actual spend and reserved
 cost are distinct quantities. Inspect the current one/worker/pool code before
-changing admission: this baseline skips entries that do not fit beside active
-reservations. A comment claiming budget safety is not evidence of a hard cap.[^run]
+changing admission: an entry that does not fit beside active reservations is
+deferred, then requeued once the workers have joined and reservations are
+released; one that does not fit the remaining budget alone is dropped. A comment claiming budget safety is not evidence of a hard cap.[^run]
 
 fit_cost fits from recorded run estimates. Its in-sample error and a hold-out
 calibration result answer different questions; preserve that distinction.[^fit]

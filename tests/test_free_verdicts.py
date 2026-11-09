@@ -117,3 +117,34 @@ class ContradictionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FactInAnotherFieldTests(unittest.TestCase):
+    """A "Key: sentence" line is parsed as a field; the fact it states must not be declared absent."""
+
+    def solve(self, question, extra):
+        files = dict(CARDS)
+        files.update(extra)
+        return fastpath.solve(make_task(KB + question, files), "search")
+
+    def test_fact_in_a_note_is_not_absent(self):
+        dana = {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\nNote: Dana Kim is mentored by Boris Ivanov\n"}
+        for q in ("Who is Dana Kim's mentor?", "In which year was Dana Kim's mentor born?"):
+            self.assertIsNone(self.solve(q, dana))
+
+    def test_fact_on_another_card_is_not_absent(self):
+        extra = {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\n",
+                 "kb/carla.md": "# Carla Diaz\n\nBorn: 1960\nNote: Carla Diaz mentors Dana Kim\n"}
+        self.assertIsNone(self.solve("Who is Dana Kim's mentor?", extra))
+
+    def test_birth_role_and_location_in_sentences(self):
+        self.assertIsNone(self.solve("In which year was Dana Kim born?",
+                                     {"kb/dana.md": "# Dana Kim\n\nDetails: born in 1990 in Lima\n"}))
+        self.assertIsNone(self.solve("Which company does Dana Kim work for?",
+                                     {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\nRole: engineer at Delta Foods\n"}))
+        self.assertIsNone(self.solve("How many people work for Delta Foods?",
+                                     {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\nRole: engineer at Delta Foods\n"}))
+
+    def test_bare_base_keeps_its_verdict(self):
+        verdict = self.solve("Who is Dana Kim's mentor?", {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\n"})
+        self.assertEqual(verdict[0], "infeasible")

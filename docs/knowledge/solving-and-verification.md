@@ -32,7 +32,7 @@
     {
       "id": "fast",
       "resource": "../../harness/fastpath.py",
-      "sha256": "01aa40d91bb23ec92a25c48ed08308cefdbfedae23ff6d159a80b05dda7813e2"
+      "sha256": "1c348fb0fc7b7cabf9cec81eb62121aaf1f2ec335904ca02b9b8a7e752bea6e1"
     },
     {
       "id": "crossfix",
@@ -66,6 +66,10 @@ fastpath answers only recognized task forms. A new form must have tests against
 nearby unsupported or ambiguous wording. crossfix reuses definitions that passed
 named tests elsewhere, with signature/docstring/edit-size guards and target tests;
 it is different from guessing a mutation until visible tests pass.[^fast][^crossfix]
+Over a card base, a free "infeasible" or a head count needs every card value to
+be bare (a year, a plain name, one lowercase word): "Note: Dana Kim is mentored
+by Carla Diaz" or "Role: engineer at Delta Foods" may state the asked fact under
+another label, so such a base goes to the model.[^fast]
 
 Card questions can combine forward Mentor links with a unique inverse link
 ("the person mentored by ..."). Inverse chains require a complete, bounded

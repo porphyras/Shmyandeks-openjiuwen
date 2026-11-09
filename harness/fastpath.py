@@ -632,6 +632,24 @@ def _no_such_field(card, field):
     return not any(any(k in key.lower() for k in kin) for key in card)
 
 
+_BARE = re.compile(r"\d{4}|[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*|[a-z]+")
+
+
+def _bare_base(cards, kin=()):
+    """True when no card value can hide a fact: every value is bare (a year, a plain name, one
+    lowercase word) and no lowercase word is one of the asked field ("Cobalt Works" is a name). "Note: Dana Kim is mentored by
+    Carla Diaz", "Details: born in 1990 in Lima", "Role: engineer at Delta Foods" state facts
+    outside their field, so absence or a count over the fields proves nothing."""
+    for c in cards.values():
+        for v in c.values():
+            if v == _CONFLICT:
+                return False  # the two values that differ are no longer seen: either may be a sentence
+            v = v.strip()
+            if not _BARE.fullmatch(v) or v.islower() and any(k in v for k in kin):  # "Role: mentor"
+                return False
+    return True
+
+
 def _walk(task, name, chain):
     """Follow the fields `chain` from the card `name`; ("solved", value) / ("infeasible", why) /
     None (anything unclear: the model looks)."""
@@ -645,6 +663,11 @@ def _walk(task, name, chain):
     value = None
     for i, field in enumerate(chain):
         card = cards.get(cur)
+        if card is None or field not in card:
+            # Any free verdict below needs a base whose values cannot state the missing fact.
+            kin = _FIELD_KIN.get(field, (field.lower(),))
+            if not _bare_base(cards, kin):
+                return None
         if card is None:
             if i == 0 and not any(_maybe_same(cur, t) for t in cards) and _only_referenced(name, cards, texts):
                 return ("infeasible", "%s has no card; the base only names it in other cards" % name)
@@ -855,7 +878,7 @@ def solve_search(task):
         if not cards or m.group(2).lower() not in cards:
             return None
         attr = _words(m.group(1)) - {"the", "of", "a", "an", "his", "her"}
-        if attr and not any(attr & _words(k) for c in cards.values() for k in c):
+        if attr and not any(attr & _words(k) for c in cards.values() for k in c) and _bare_base(cards, tuple(attr)):
             return ("infeasible", "no card has a field for %s" % m.group(1))
     return None
 
@@ -883,8 +906,8 @@ def _search_special(task, rx, m):
         return ("solved", "yes" if a < int(m.group(2)) else "no")
     if rx is _STAFF:
         company = m.group(1)
-        if company.lower() not in cards:
-            return None
+        if company.lower() not in cards or not _bare_base(cards, _FIELD_KIN["Employer"]):
+            return None  # "Note: joined Delta Foods in 2020" on a card without Employer would be missed
         n = 0
         for title, f in cards.items():
             emp = f.get("Employer")
