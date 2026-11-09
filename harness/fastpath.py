@@ -771,13 +771,15 @@ def _person_chain(s):
         return s, []
     # Prefixes bind the entire expression to their right: "the person mentored
     # by Alice Wang's mentor" means inverse(forward(Alice)), not forward(inverse(Alice)).
-    for prefix, edge in (("the mentor of ", "Mentor"), ("the person mentored by ", "^Mentor")):
+    for prefix, edge in (("the mentor of ", "Mentor"), ("the person mentored by ", "^Mentor"),
+                         ("the mentee of ", "^Mentor")):
         if s.startswith(prefix):
             r = _person_chain(s[len(prefix):])
             return (r[0], r[1] + [edge]) if r else None
-    if s.endswith("'s mentor"):
-        r = _person_chain(s[:-len("'s mentor")])
-        return (r[0], r[1] + ["Mentor"]) if r else None
+    for suffix, edge in (("'s mentor", "Mentor"), ("'s mentee", "^Mentor")):
+        if s.endswith(suffix):
+            r = _person_chain(s[:-len(suffix)])
+            return (r[0], r[1] + [edge]) if r else None
     return None
 
 
@@ -797,6 +799,8 @@ def _company_chain(s):
 _CHAIN_Q = [
     (r"Who is mentored by (.+)\?", _person_chain, "^Mentor"),
     (r"Who is (the person mentored by .+)\?", _person_chain, None),
+    (r"Who is (the mentee of .+)\?", _person_chain, None),
+    (r"Who is (.+'s mentee)\?", _person_chain, None),
     (r"In which year was (.+) born\?", _person_chain, "Born"),
     (r"What is the birth year of (.+)\?", _person_chain, "Born"),
     (r"In what year was (.+) born\?", _person_chain, "Born"),
