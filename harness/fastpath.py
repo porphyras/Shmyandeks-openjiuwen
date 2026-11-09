@@ -635,6 +635,9 @@ def _no_such_field(card, field):
 _BARE = re.compile(r"\d{4}|[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*|[a-z]+")
 
 
+_LINK_WORDS = {"by", "at", "in", "is", "was", "from", "since", "to", "with", "for", "of", "under"}
+
+
 def _bare_base(cards, kin=()):
     """True when no card value can hide a fact: every value is bare (a year, a plain name, one
     lowercase word) and no lowercase word is one of the asked field ("Cobalt Works" is a name). "Note: Dana Kim is mentored by
@@ -647,6 +650,9 @@ def _bare_base(cards, kin=()):
             v = v.strip()
             if not _BARE.fullmatch(v) or v.islower() and any(k in v for k in kin):  # "Role: mentor"
                 return False
+            words = v.split()
+            if len(words) >= 4 or _LINK_WORDS & {w.lower() for w in words[1:]}:
+                return False  # "Mentored By Carla Diaz": a sentence in Title Case, not a name
     return True
 
 

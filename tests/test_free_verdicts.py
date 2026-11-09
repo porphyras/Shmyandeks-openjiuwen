@@ -136,6 +136,8 @@ class FactInAnotherFieldTests(unittest.TestCase):
         extra = {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\n",
                  "kb/carla.md": "# Carla Diaz\n\nBorn: 1960\nNote: Carla Diaz mentors Dana Kim\n"}
         self.assertIsNone(self.solve("Who is Dana Kim's mentor?", extra))
+        title_case = {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\nNote: Mentored By Boris Ivanov\n"}
+        self.assertIsNone(self.solve("Who is Dana Kim's mentor?", title_case))
 
     def test_birth_role_and_location_in_sentences(self):
         self.assertIsNone(self.solve("In which year was Dana Kim born?",
