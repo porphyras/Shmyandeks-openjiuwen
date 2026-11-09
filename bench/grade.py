@@ -168,6 +168,12 @@ def grade(set_dir, run, timeout=30):
             r["lenient"] = r["correct"] and lenient
         elif k["check"] == "exact_str":
             r["correct"] = ans.strip() == str(k["expected"]).strip()
+        elif k["check"] == "exact_num2":
+            # a number compared to two decimals ("45.92")
+            try:
+                r["correct"] = abs(float(ans.strip()) - float(k["expected"])) < 0.005 + 1e-9
+            except ValueError:
+                r["note"] = "not a number"
         elif k["check"] == "unittest":
             if ans.strip() != "DONE":
                 r["note"] = "answer is not DONE"
