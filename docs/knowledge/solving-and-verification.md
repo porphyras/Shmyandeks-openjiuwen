@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "39b0c671a78fa3b7bd487b2f0fc8185ccef9e3c09a13772fe362d47629458e80"
+      "sha256": "c9ff5b67a21b5ccf8c234a1c4110689b859058a24b5271fe4fc0764adc9bba31"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "68231b1eb908e707362e041ee5107f12574da94246bae2fc60be484f5dea809a"
+      "sha256": "d29c7e590281b3753bef295cae5e6aaca9974ee2c2d8703518e1b524d86ef62d"
     },
     {
       "id": "fast",
@@ -56,6 +56,12 @@ call; the required information may already be available locally.[^context]
 | coding | changed function definitions | merge into sources and run discovered tests |
 
 The exact prompts, reply parsing, retries and exceptions live in Solver.
+A search that ends in NOT FOUND after every look gets one targeted look
+(HARNESS_ENTITY_LOOK, on by default): entity_passages gathers the paragraphs
+about the names the last reply reached, in any written form ("J. Muller"), with
+the paragraph after each mention and documents named after the entity. Only an
+answer found verbatim in those paragraphs (or a number for a counting question)
+is accepted; otherwise the verdict stays infeasible.[^solver][^context]
 A test-success verdict controls DONE; it is not proof of hidden-test correctness.
 Inspect _run_tests_once when extending supported test styles.[^solver]
 It discovers unittest classes without a main entry point and plain test functions;

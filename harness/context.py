@@ -455,6 +455,84 @@ def prose_passages(docs, instr, limit, extra="", own_articles=0):
     return "\n".join("[%s] %s" % passages[i] for i in chosen)[:limit]
 
 
+def _name_forms(name):
+    """Patterns for a person or company name as a base may write it: in full, "J. Muller",
+    "J Muller" (two-word names only)."""
+    words = name.split()
+    pats = [r"\b%s\b" % r"\s+".join(map(re.escape, words))]
+    if len(words) == 2 and words[0][0].isupper():
+        pats.append(r"\b%s\.?\s+%s\b" % (re.escape(words[0][0]), re.escape(words[1])))
+    return re.compile("|".join(pats))
+
+
+# How bases word the attributes questions ask about ("founded" -> "started in 2000", "HQ: Tbilisi").
+_ATTR_WORDS = {
+    "founded": ("started", "established", "dates", "since", "launched", "created", "formed"),
+    "headquarters": ("hq", "headquartered", "based", "head", "office", "offices"),
+    "headquartered": ("hq", "headquarters", "based", "head", "office"),
+    "born": ("birth", "birthday", "year"),
+    "employs": ("works", "employer", "joined", "behalf", "staff", "engineer", "analyst"),
+    "employer": ("works", "employs", "joined", "behalf", "staff", "engineer", "analyst"),
+}
+
+
+def entity_passages(docs, instr, names, limit=8000):
+    """Targeted look for names the model reached but whose facts it did not see: paragraphs
+    that mention a name in any of its written forms, each with the paragraph after it (a
+    profile block "Birth year: 1988" follows its introduction), and the opening paragraphs of
+    documents named after the entity (kb/interview_jonas_muller.md). Each name gets an equal
+    share of `limit`; within it the entity's own documents come first, then mentions ranked by
+    the question's words. Names the base never mentions are dropped."""
+    by_doc = []
+    for rel, text in docs:
+        paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+        paras = [p for p in paras if not (p.startswith("#") and len(p) < 120)]
+        by_doc.append((rel, _title(rel, text), paras))
+    q = [w for w in _norm(instr).split() if w not in _STOP and len(w) > 2]
+    for w in list(q):
+        q += _ATTR_WORDS.get(w, ())
+    groups = []
+    for name in names:
+        pat = _name_forms(name)
+        slug = _norm(name).replace(" ", "_")
+        own, ment = [], []
+        for d, (rel, title, paras) in enumerate(by_doc):
+            mine = slug in os.path.basename(rel).lower() or _norm(name) in _norm(title)
+            for j, p in enumerate(paras):
+                if mine and j < 3:
+                    own.append((d, j))
+                if pat.search(p):
+                    ment.append((d, j))
+        if not own and not ment:
+            continue
+        if ment:
+            order, _ = _bm25_rank([(by_doc[d][1], by_doc[d][2][j]) for d, j in ment], q)
+            ment = [ment[i] for i in order]
+        groups.append((own, ment))
+    if not groups:
+        return ""
+    share = limit // len(groups)
+    chosen = []
+    for own, ment in groups:
+        size = 0
+        for d, j in own + [x for dj in ment for x in (dj, (dj[0], dj[1] + 1))]:
+            if size >= share:
+                break
+            if j < len(by_doc[d][2]) and (d, j) not in chosen:
+                chosen.append((d, j))
+                size += len(by_doc[d][2][j])
+    return "\n".join("[%s] %s" % (by_doc[d][1], by_doc[d][2][j][:900]) for d, j in chosen)[:limit]
+
+
+def reply_names(instr, reply, top=3):
+    """Names a reply reached beyond the question (most mentioned first), then the question's."""
+    import collections
+    q = _entities(instr)
+    found = re.findall(r"\b([A-Z][a-z][\w\-]*(?:\s+[A-Z][a-z][\w\-]*){1,2})\b", reply or "")
+    c = collections.Counter(n for n in found if n not in q)
+    return [n for n, _ in c.most_common(top)] + q
+
+
 def kb_context(task, full_limit=600, max_docs=12):
     """Pick the documents mentioning the entities of the question and follow name links
     (a document that mentions another document's title pulls it in). Falls back to the
