@@ -22,7 +22,7 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "bcacc0485e40b23f66e61d5a5617b1eaf1bd43bae6ab97203a0bf94fae68c109"
+      "sha256": "7d8e4db208dbab7dc6fd91b518256e7048cdd98c56fbe1bad8b400339b5c63a5"
     },
     {
       "id": "context",

@@ -93,5 +93,31 @@ class AnnouncedColumnTests(unittest.TestCase):
         self.assertFalse(any("missing in file" in p for p in self.problems("How many units were sold in region 'west'?")))
 
 
+class AnswerFormatTests(unittest.TestCase):
+    def test_decimals_the_task_asks_for(self):
+        ask = "What is the average price? Round the result to 2 decimal places."
+        self.assertEqual(solver.format_for_instruction("51.4", ask), "51.40")
+        self.assertEqual(solver.format_for_instruction("15", ask), "15.00")
+        self.assertEqual(solver.format_for_instruction("1234.5", ask), "1234.50")
+        self.assertEqual(solver.format_for_instruction("0.5", ask), "0.50")
+        self.assertEqual(solver.format_for_instruction("3.14159", "Give it to 3 decimals."), "3.142")
+
+    def test_more_digits_round_like_python(self):
+        ask = "Round the result to 2 decimal places."
+        self.assertEqual(solver.format_for_instruction("2.675", ask), "2.67")  # f"{2.675:.2f}"
+        self.assertEqual(solver.format_for_instruction("0.125", ask), "0.12")
+        self.assertEqual(solver.format_for_instruction("-1.005", ask), "%.2f" % -1.005)
+        self.assertEqual(solver.format_for_instruction("2.675", "Round to two decimals (round half up)."), "2.68")
+
+    def test_other_answers_unchanged(self):
+        self.assertEqual(solver.format_for_instruction("7", "How many units were sold?"), "7")
+        self.assertEqual(solver.format_for_instruction("west", "Round the result to 2 decimal places."), "west")
+        self.assertEqual(solver.format_for_instruction("3", "Round to 2 decimal places, or to 3 decimals."), "3")
+
+    def test_label_questions(self):
+        self.assertTrue(solver._ASKS_LABEL.search("Which product had the highest revenue?"))
+        self.assertIsNone(solver._ASKS_LABEL.search("Which year had the most sales?"))
+
+
 if __name__ == "__main__":
     unittest.main()

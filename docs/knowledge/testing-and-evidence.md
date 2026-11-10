@@ -26,7 +26,7 @@
     {
       "id": "local",
       "resource": "../../bench/run_local.sh",
-      "sha256": "c488303e73b6e5f4dae708ff0712f9a5abb5b3833c93a90440be46151d50fc92"
+      "sha256": "a8224368cdf9de3915eb7409c96c95f284ec49ee3226f1494d172030915eab70"
     },
     {
       "id": "judge",

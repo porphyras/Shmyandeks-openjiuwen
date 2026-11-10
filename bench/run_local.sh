@@ -19,6 +19,8 @@ fi
 PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
 STUB_ARGS=(--port "$PORT" --host 127.0.0.1 --mode "$MODE" --budget "$BUDGET" --stats "$RUN/stats.json")
 [ "$MODE" = "mock" ] && [ -f "$SET/oracle_mock.json" ] && STUB_ARGS+=(--oracle "$SET/oracle_mock.json")
+# extra stub flags, e.g. STUB_EXTRA="--dead-models qwen3.8-27b-noreason"
+[ -n "${STUB_EXTRA:-}" ] && read -r -a _extra <<< "$STUB_EXTRA" && STUB_ARGS+=("${_extra[@]}")
 (
   if [ "$MODE" = "forward" ]; then
     set -a; . "$HOME/.config/hack2/llm.env"; set +a

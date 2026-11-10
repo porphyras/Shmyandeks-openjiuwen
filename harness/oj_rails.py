@@ -107,18 +107,20 @@ class ProxyBudgetRail(AgentRail):
 class ProxyResilienceRail(ToolCallResilienceRail):
     """The SDK's resilience rail, applied to the proxy call: failed calls are free, so transport
     errors, rate limits and outages are retried with backoff until `give_up`; an explicit
-    "quota spent" answer marks the ledger exhausted; a 400/404 fails only this call (after one
-    switch of the base URL on a 404). The retry itself is the `@rail` decorator's loop."""
+    "quota spent" answer marks the ledger exhausted; "model not found" moves the call (and later
+    ones) to another model; another 400/404 fails only this call (after one switch of the base
+    URL on a 404). The retry itself is the `@rail` decorator's loop."""
 
     priority = 70
 
-    def __init__(self, ledger, classify, switch_base, log):
+    def __init__(self, ledger, classify, switch_base, log, mark_dead=lambda e, model: False):
         # the attempt budget is a time budget here (`give_up`), as in the previous retry loop
         super().__init__(max_attempts=10 ** 6)
         self.ledger = ledger
         self.classify = classify
         self.switch_base = switch_base
         self.log = log
+        self.mark_dead = mark_dead
 
     async def on_model_exception(self, ctx: AgentCallbackContext) -> None:
         e = ctx.exception
@@ -130,6 +132,12 @@ class ProxyResilienceRail(ToolCallResilienceRail):
                   "transport": self._is_retryable_exception(e)})
         if kind == "budget":
             self.ledger.proxy_exhausted = True
+            return
+        if kind in ("fatal", "transient") and self.mark_dead(e, ctx.extra.get("model")):
+            # "model not found" (named in the error): the base URL is right, the model is not
+            # served - retry the call on another model, never switch the base URL for this.
+            ctx.extra["kind"] = "model"
+            ctx.request_retry()
             return
         if kind == "fatal":
             if self.switch_base(e):

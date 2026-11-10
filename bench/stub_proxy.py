@@ -125,6 +125,9 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             return self._send(400, {"error": {"message": "bad json"}})
         model = body.get("model", "?")
+        if model in ARGS.dead_models.split(","):
+            return self._send(404, {"error": {"message": "The model `%s` does not exist." % model,
+                                              "type": "invalid_request_error", "code": "model_not_found"}})
         if ARGS.latency:
             time.sleep(ARGS.latency * random.uniform(0.7, 1.3))
         if ARGS.mode == "mock":
@@ -182,6 +185,7 @@ def main():
     p.add_argument("--mock-garbage", type=float, default=0.0, help="probability of a garbage reply")
     p.add_argument("--stats", default="")
     p.add_argument("--upstream-timeout", type=float, default=180)
+    p.add_argument("--dead-models", default="", help="comma list of models answered with 404 model_not_found")
     ARGS = p.parse_args()
     if ARGS.oracle:
         with open(ARGS.oracle) as f:

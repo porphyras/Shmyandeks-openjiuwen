@@ -185,6 +185,36 @@ def normalize_answer(s):
     return s
 
 
+_DECIMALS = re.compile(r"(?i)\b(?:round(?:ed|ing)?|to|with|using|keep|in)\b[^.\n]{0,40}?\b(\d|one|two|three|four)\s+decimals?"
+                       r"(?:\s+places?|\s+digits?)?\b")
+_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4}
+
+
+def format_for_instruction(ans, instruction):
+    """A number written with exactly the decimals the task asks for ("Round the result to 2
+    decimal places": 51.4 -> 51.40, 15 -> 15.00). Fewer digits are only padded with zeros; more
+    are rounded the way a Python task generator does (f"{x:.2f}": 2.675 -> 2.67, 0.125 -> 0.12),
+    or half up when the task says so. Anything else unchanged."""
+    asked = {_WORD_NUM.get(x.lower()) or int(x) for x in _DECIMALS.findall(instruction or "")}
+    if len(asked) != 1 or not re.fullmatch(r"-?\d+(\.\d+)?", ans or ""):
+        return ans
+    n = asked.pop()
+    if n <= 0:
+        return ans
+    whole, _, frac = ans.partition(".")
+    if len(frac) <= n:
+        return "%s.%s" % (whole, frac.ljust(n, "0"))
+    if re.search(r"(?i)\bhalf[\s-]+up\b", instruction):  # the task names its rounding rule
+        from decimal import Decimal, ROUND_HALF_UP
+        return str(Decimal(ans).quantize(Decimal(1).scaleb(-n), rounding=ROUND_HALF_UP))
+    return "%.*f" % (n, float(ans))
+
+
+# "Which product/region/... ?" asks for a label: a bare number printed for it is a wrong column.
+_ASKS_LABEL = re.compile(r"(?i)\bwhich\s+(?:product|region|city|country|category|customer|employee|department|"
+                         r"item|brand|team|club|supplier|vendor|store|salesperson|person)s?\b")
+
+
 def last_line(out):
     lines = [l.strip() for l in (out or "").splitlines() if l.strip()]
     return lines[-1] if lines else ""
@@ -488,7 +518,9 @@ class Solver:
         msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
         last_err = ""
         model_code = code = ""
-        for attempt in range(1 if level >= 2 else 2):  # the reasoning rung gets one call
+        label_fallback = ""  # a number printed for "which ...?", kept if the retry yields nothing better
+        tries = 1 if level >= 2 else 2
+        for attempt in range(tries):  # the reasoning rung gets one call
             if attempt:
                 msgs = msgs[:2] + [{"role": "assistant", "content": "```python\n%s\n```" % (model_code or code)},
                                    {"role": "user", "content": last_err + " Reply with the fixed program only."}]
@@ -539,6 +571,14 @@ class Solver:
                 last_err = "The program printed a table, not the single answer value."
                 code = model_code
                 continue
+            if rc == 0 and data and attempt + 1 < tries and re.fullmatch(r"-?[\d.]+", ans or "") and \
+                    _ASKS_LABEL.search(instr):
+                # "Which product ...?" answered with a number: most likely the value, not its label
+                # (idxmax vs max). One more try; a number printed again is accepted.
+                last_err = "The question asks which one: print its name/label (e.g. with idxmax), not a number."
+                label_fallback = ans
+                code = model_code
+                continue
             if rc == 0 and ans and ans.lower() not in ("none", "nan", "null", "inf", "-inf"):
                 return Outcome("solved", ans, code=model_code)
             km = re.search(r"KeyError: ['\"]([^'\"\n]{1,60})['\"]", err or "") if rc else None
@@ -552,6 +592,8 @@ class Solver:
             tail = [l for l in (err or "").strip().splitlines() if l.strip()][-4:]
             last_err = ("Program timed out." if rc is None else
                         "Program failed:\n" + "\n".join(l[:200] for l in tail) if tail else "Program printed nothing.")
+        if label_fallback:
+            return Outcome("solved", label_fallback, "number for a which-question; the retry failed")
         return Outcome("failed", note=last_err)
 
     def _solve_search(self, task, info, level):

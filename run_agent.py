@@ -127,7 +127,8 @@ class Run:
         self.fast = os.environ.get("HARNESS_FAST", "1") == "1"
         self.fast_answers = {}
         self.economy = False
-        self.llm = LLM(os.environ.get("LLM_BASE_URL", ""), api_key, budget=budget, log=trace)
+        self.llm = LLM(os.environ.get("LLM_BASE_URL", ""), api_key, budget=budget, log=trace,
+                       fallback=list(dict.fromkeys(m for lad in LADDERS.values() for m in lad)))
         self.solver = Solver(self.ask)
         self.cost = {}
         self.lock = threading.Lock()
@@ -224,6 +225,9 @@ class Run:
         ans = outcome.answer
         if outcome.status == "infeasible":
             ans = self.infeasible_answer or None
+        elif task.kind in ("math", "data") and ans:
+            from harness.solver import format_for_instruction
+            ans = format_for_instruction(ans, task.instruction)
         if ans not in (None, ""):
             ans = redact(ans)
             with self.lock:

@@ -21,7 +21,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "d026fec146ee178f5c97a4edcbe643e8ebaefaf08cb8fd0f71601a8b63f41ef7"
+      "sha256": "cb8f82ece57b7a67814204e3c9049353b086e65ebf2b75af574ad6d365d3c0a8"
     },
     {
       "id": "context",
@@ -48,6 +48,8 @@ work by expected reward per cost. The Python process sees the batch; each solver
 constructs messages for an individual task. There is no shared batch-wide model
 conversation. Cross-task code reuse is an explicit crossfix operation.[^run]
 
+A math or data answer is written with exactly the decimals the task asks for
+(padding only, or Python-style rounding of extra digits; half up when stated).
 The output contract is answer.txt in the task directory and, when present, its
 workspace. Coding tasks also leave modified source files. Summary optionally
 writes solutions.json and token_estimates.json. Per-task answers are persisted

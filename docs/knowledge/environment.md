@@ -36,12 +36,12 @@
     {
       "id": "llm",
       "resource": "../../harness/llm.py",
-      "sha256": "56325f9d9bbde2975d53686d0aa9a30cb0a4be7e34e24a98d1f41e7628cc02de"
+      "sha256": "2c1a09762cd67fa1a09ac7d7f4327e56d1ef3c8fd1086b4511fed596b9996d6d"
     },
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "d026fec146ee178f5c97a4edcbe643e8ebaefaf08cb8fd0f71601a8b63f41ef7"
+      "sha256": "cb8f82ece57b7a67814204e3c9049353b086e65ebf2b75af574ad6d365d3c0a8"
     },
     {
       "id": "deps",

@@ -21,17 +21,17 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "d026fec146ee178f5c97a4edcbe643e8ebaefaf08cb8fd0f71601a8b63f41ef7"
+      "sha256": "cb8f82ece57b7a67814204e3c9049353b086e65ebf2b75af574ad6d365d3c0a8"
     },
     {
       "id": "llm",
       "resource": "../../harness/llm.py",
-      "sha256": "56325f9d9bbde2975d53686d0aa9a30cb0a4be7e34e24a98d1f41e7628cc02de"
+      "sha256": "2c1a09762cd67fa1a09ac7d7f4327e56d1ef3c8fd1086b4511fed596b9996d6d"
     },
     {
       "id": "rails",
       "resource": "../../harness/oj_rails.py",
-      "sha256": "ead935d0fbe22844f9ee70be1d1061647dc46f2d0cba5c27c645fdf9fa2e91cd"
+      "sha256": "0a5578d060334365447908040b5c69a1ed6db51c6556559d990efc786fef9e56"
     },
     {
       "id": "fit",
@@ -48,6 +48,11 @@ completion, with handling for separately reported reasoning. Model usage is
 billed after replies; an explicit proxy-quota error controls exhaustion.[^rails]
 LLM.chat bridges worker threads to the SDK event loop. classify_error separates
 quota, fatal per-call errors, rate limits and transient failures.[^llm]
+A 400/404 that names the requested model as not served (or carries the code
+model_not_found) marks that model dead: its calls move to the next live model
+of the ladder order, the base URL is left alone, and a reasoning model standing
+in for a no-reasoning one gets room to think. The SDK wraps every error as
+"model call failed", so a 404 without the model's name is not taken for this.[^llm][^rails]
 
 Run owns model ladders, PRIOR_P, COST_FIT, argument/environment precedence,
 reasoning limits and economy mode. Read those definitions for exact defaults.
