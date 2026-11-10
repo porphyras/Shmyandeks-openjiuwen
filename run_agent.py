@@ -234,6 +234,7 @@ class Run:
                 self.answers[task.dir] = ans
             if not write_answer(task.dir, ans):
                 trace({"ev": "write_failed", "task": task.name, "dir": task.dir})
+                self.say_write_failed(task.dir)
             self.summary.record(task.id, ans)
         self.results[task.name] = outcome.status
         est = self.estimates.get(task.name)
@@ -244,6 +245,28 @@ class Run:
         trace({"ev": "task", "task": task.name, "kind": task.kind, "status": outcome.status, "answer": ans,
                "note": outcome.note, "cost": round(self.cost.get(task.name, 0.0), 1),
                "spent": round(self.llm.spent, 1)})
+
+    def check_writable(self, tasks):
+        """A probe file in the first task folder: answers must land there. If the folder is not
+        writable for this process (root without CAP_DAC_OVERRIDE on a host directory), say so
+        loudly at once rather than finishing silently with no answers on disk."""
+        for t in tasks[:1]:
+            probe = os.path.join(t.dir, ".write_probe_%d" % os.getpid())
+            try:
+                fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                os.close(fd)
+                os.unlink(probe)
+            except OSError as e:
+                trace({"ev": "tasks_not_writable", "dir": t.dir, "err": type(e).__name__})
+                self.say_write_failed(t.dir)
+
+    def say_write_failed(self, d):
+        if getattr(self, "_said_write_failed", False):
+            return
+        self._said_write_failed = True
+        print("WARNING: cannot write answer.txt into %s: the task folders must be writable for the "
+              "container's user (e.g. chmod -R a+rwX on the tasks directory). Answers are still kept "
+              "in $OUT/solutions.json when OUT is set." % d, file=sys.stderr, flush=True)
 
     @staticmethod
     def precheck_outcome(t, info):
@@ -293,6 +316,7 @@ class Run:
         self.solver.careful = self.careful
         trace({"ev": "start", "tasks": len(tasks), "careful": self.careful, "dir": self.tasks_dir,
                "workers": self.workers, "budget": self.llm.budget})
+        self.check_writable(tasks)
         infos = self.prepare_all(tasks, deadline_s=max(30.0, min(240.0, self.time_left() / 6)))
         self.infos = infos
         # Functions that passed their tests in one code task, to repair the same functions
@@ -514,6 +538,10 @@ class Run:
             pool()
             self.rewrite_answers()
         executor.shutdown(wait=False)
+        written = sum(1 for d in self.answers if os.path.isfile(os.path.join(d, "answer.txt")) or
+                      os.path.isfile(os.path.join(d, "workspace", "answer.txt")))
+        print("Done: %d tasks, %d answers written to the task folders, %.0f budget units spent in %d model calls."
+              % (len(tasks), written, self.llm.spent, self.llm.calls), file=sys.stderr, flush=True)
         trace({"ev": "end", "spent": round(self.llm.spent, 1), "calls": self.llm.calls,
                "by_model": self.llm.by_model, "results": _count(self.results.values()),
                "elapsed": round(time.time() - T0, 1)})

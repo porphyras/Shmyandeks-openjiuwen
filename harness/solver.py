@@ -193,7 +193,7 @@ _DEC_IN_QUESTION = re.compile(  # inside the question sentence itself
     r"(?i)\bround(?:ed)?\s+to\s+(?:exactly\s+)?%s\s+decimal|\(\s*%s\s+decimals?(?:\s+places?)?\s*\)" % (_NUM_WORD, _NUM_WORD))
 _DEC_IMPERATIVE = re.compile(  # a sentence that tells how to write the answer
     r"(?i)^(?:please\s+)?(?:round|give|report|express|write|present|provide|return|state|answer)\b"
-    r"(?:\s+(?:the|your|final|result|answer|it|value|as|a|decimal|number|rounded|half|up))*"
+    r"(?:\s+(?:the|your|final|result|answer|it|value|as|a|decimal|number|rounded|half|up|percentage|percent))*"
     r"\s+(?:(?:to|with|using|in)\s+)?(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
 _DEC_FOR_ANSWER = re.compile(  # "Keep 2 decimal places in the answer."
     r"(?i)\b%s\s+decimals?(?:\s+places?)?\s+(?:in|for|of)\s+(?:the\s+|your\s+)?(?:final\s+)?(?:answer|result)\b"
@@ -203,24 +203,55 @@ _DEC_ROUND_IT = re.compile(  # "... and round it / the result to 2 decimals"
     r"to\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
 
 
+_DEC_SUBJECT = re.compile(  # "The answer should be rounded to 2 decimal places", "Your answer should have 2 ..."
+    r"(?i)\b(?:the|your)\s+(?:final\s+)?(?:answer|result)\s+(?:should|must|is\s+to|needs\s+to|has\s+to|will)\b"
+    r"[^.?!]*?\b%s\s+decimal" % _NUM_WORD)
+_DEC_USE = re.compile(r"(?i)^(?:please\s+)?(?:use|keep)\s+(?:exactly\s+)?%s\s+decimals?(?:\s+places?)?\s*[.!]?$" % _NUM_WORD)
+_DEC_ROUNDED = re.compile(r"(?i)\bround(?:ed)?\s+to\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
+_DEC_Q_ANY = re.compile(r"(?i)\b(?:to|with|in)\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
+# Verbs of a sentence that describes the data rather than the answer ("Prices are stored with 2
+# decimal places", "All amounts in the file are rounded to 2 decimals").
+_DATA_VERBS = re.compile(r"(?i)\b(?:stored|recorded|listed|written|shown|formatted|given|appears?|are|were|is|was|"
+                         r"has|have|contains?)\b")
+_DATA_VERBS_Q = re.compile(r"(?i)\b(?:stored|recorded|listed|written|shown|formatted|given|appears?)\b")
+
+
+# The count of decimals must END its sentence: "... to 2 decimal places.", "(two decimals)?",
+# "... with exactly two decimals (round half up).", "... 2 decimal places in the answer." A count
+# followed by more words ("rounded to 2 decimal places, above 5.30?", "... before comparing",
+# "... in the result table") is about the data.
+_DEC_AT_END = re.compile(r"(?i)\b%s\s+decimals?(?:\s+(?:places?|digits?))?(?:\s+(?:in|for|of)\s+(?:the\s+|your\s+)?"
+                         r"(?:final\s+)?(?:answer|result))?\s*(?:\(\s*round(?:ed)?\s+half[\s-]+up\s*\))?\s*[.?!)]*\s*$"
+                         % _NUM_WORD)
+
+
 def _asked_decimals(instruction):
-    """Decimals the task asks the answer to have: from the question sentence (", rounded to two
-    decimals?", "(two decimals)?") or a sentence about the answer ("Round the result to 2
-    decimal places.", "Give the answer with exactly two decimals.", "... and round it to 2
-    decimals"); None when not asked, asked ambiguously, or the question wants a whole number."""
+    """Decimals the task asks the ANSWER to have, or None (not asked, asked ambiguously, or the
+    question wants a whole number). A sentence counts when it ends with the count of decimals
+    and is about the answer: the answer as subject ("The result must be given with 2 decimal
+    places."), an instruction about it ("Round the result to 2 decimal places.", "Give the
+    answer with exactly two decimals.", "... round it to 2 decimals.", "Keep 2 decimal places
+    in the answer.", "Use 2 decimal places."), "rounded to N decimals" in a sentence that does
+    not describe the data, or "to/with/in N decimals" / "(N decimals)" closing the question."""
     sents = [x.strip() for x in re.split(r"(?<=[.?!])\s+(?=[A-Z(])", instruction or "") if x.strip()]
     qs = [i for i, x in enumerate(sents) if x.endswith("?")]
     q = qs[-1] if qs else -1
+    if q >= 0 and re.search(r"(?i)\bnearest\s+(?:integer|whole\s+number)|\bwhole\s+number\b", sents[q]):
+        return None
+    count = re.compile(r"(?i)\b%s\s+decimal" % _NUM_WORD)
     found = set()
-    if q >= 0:
-        if re.search(r"(?i)\bnearest\s+(?:integer|whole\s+number)|\bwhole\s+number\b", sents[q]):
-            return None
-        for m in _DEC_IN_QUESTION.finditer(sents[q]):
-            found.add(next(g for g in m.groups() if g))
-    for x in sents:
-        if _DEC_IMPERATIVE.match(x) or _DEC_ROUND_IT.search(x) or _DEC_FOR_ANSWER.search(x):
+    for i, x in enumerate(sents):
+        if not _DEC_AT_END.search(x):
+            continue
+        about_answer = (_DEC_SUBJECT.search(x) or _DEC_IMPERATIVE.match(x) or _DEC_ROUND_IT.search(x)
+                        or _DEC_FOR_ANSWER.search(x) or _DEC_USE.match(x))
+        if not about_answer and not (_DATA_VERBS_Q if i == q else _DATA_VERBS).search(x):
+            counting = i == q and re.match(r"(?i)how\s+many\b", x)  # "How many ... with 2 decimal places?"
+            about_answer = (_DEC_ROUNDED.search(x) or _DEC_IN_QUESTION.search(x) if i == q else _DEC_ROUNDED.search(x)) \
+                or (i == q and not counting and _DEC_Q_ANY.search(x))
+        if about_answer:
             # every count the sentence names ("to 2 decimal places, or to 3") - two make it ambiguous
-            found.update(re.findall(r"(?i)\b%s\s+decimal" % _NUM_WORD, x))
+            found.update(count.findall(x))
     asked = {_WORD_NUM.get(x.lower()) or int(x) for x in found}
     return asked.pop() if len(asked) == 1 else None
 

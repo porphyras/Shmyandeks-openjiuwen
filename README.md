@@ -30,9 +30,14 @@ Input: a directory of task folders, each with `task.json` (`instruction`, `task_
 OpenAI-compatible and given by `LLM_BASE_URL` (for example `http://proxy:8000/v1`) and
 `LLM_API_KEY`. Output: `answer.txt` in every task folder the harness answers (details below).
 
+Build the image, make the task folders writable for the container's user, then run the
+organisers' command from the rules (the network `hack-net` with the proxy, `TEAM` and the
+`LLM_*` values are theirs):
+
 ```bash
 docker build -t hack:latest .
 TASKS=/absolute/path/to/tasks   # the directory of task folders
+chmod -R a+rwX "$TASKS"         # the container runs as root without capabilities: it can only write into world-writable folders
 timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   --network hack-net -e LLM_BASE_URL -e LLM_API_KEY \
   -v "$TASKS:/data/tasks:rw" \
@@ -43,9 +48,23 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   hack:latest /app/run_agent.py --tasks-dir /data/tasks
 ```
 
-The image's default entry point does the same (`docker run ... hack:latest` runs
-`python /app/run_agent.py --tasks-dir /data/tasks`). Without Docker, on Linux x86-64 with
-Python 3.12:
+Without the `chmod` the run cannot write any `answer.txt`; the harness then prints a warning
+to stderr at the start. At the end it prints one line such as `Done: 8 tasks, 8 answers written
+to the task folders, 506 budget units spent in 18 model calls.` (the JSON lines before it are
+progress events).
+
+A local try without the organisers' network: give a proxy the container can reach (on Docker
+Desktop the host is `host.docker.internal`) and drop `--network`. The image's default entry
+point runs `python /app/run_agent.py --tasks-dir /data/tasks`:
+
+```bash
+export LLM_BASE_URL=http://host.docker.internal:8000/v1 LLM_API_KEY=your-key
+docker run --rm -e LLM_BASE_URL -e LLM_API_KEY -v "$TASKS:/data/tasks:rw" \
+  --read-only --tmpfs /tmp:rw,size=2g -e HOME=/tmp \
+  --cap-drop ALL --security-opt no-new-privileges hack:latest
+```
+
+Without Docker, on Linux x86-64 with Python 3.12:
 
 ```bash
 pip install -r requirements.txt
@@ -89,9 +108,8 @@ LLM_BASE_URL=... LLM_API_KEY=... python run_agent.py --tasks-dir /path/to/tasks
   event loop. The workflow state carries the task name, its rung and three flags; the planner
   (order by expected reward per token, reservations, the second pass) schedules the workflows.
 
-The harness does not use openJiuwen's agents or tool schemas on purpose: every task is solved
-with one compact prompt, and tool schemas or conversation history would multiply the input
-tokens the budget is counted in.
+Each step of a task sends one compact prompt with only what that step needs, since the budget
+is counted in tokens.
 
 ### Output
 

@@ -41,7 +41,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "5ab3f4a61f744a54ee697a591c09cd45e7747df60b2d060b8ad99328333aa804"
+      "sha256": "a417a829eee7d6ac9f379b75fb8d86f5a4c84469b3931a464a6caa17394657c9"
     },
     {
       "id": "deps",
@@ -67,6 +67,10 @@ The harness reads the mounted task directory and optional output/budget argument
 Model credentials come from the environment at startup. main takes the key,
 installs signal handling and configures SDK logging before creating Run.
 Avoid importing the SDK before logging configuration when changing startup.[^run][^llm]
+Run probes the first task folder with a temporary file before any work: a task
+directory the container's user cannot write (root without capabilities on a host
+folder) is reported on stderr at once, and the run ends with a one-line summary
+of answers written and units spent.[^run]
 
 sandbox.py defines the interpreter, clean environment, subprocess launcher,
 timeouts, output capture and resource limits. Model programs execute in task
