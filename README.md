@@ -19,14 +19,20 @@ The deterministic fast path below is an accelerator for statements written in th
 forms; it is never relied on for the score. The general path (inspection, one short model call,
 a free check) carries everything else and was measured on four independent sets of a different
 nature: hold-out A (competition and word math, table QA, multi-hop QA, small packages with bugs)
-138–141 of 142, hold-out B, blind red-team batches and the hard bench set (GSM-Hard, MBPP,
-MuSiQue, DABench).
+133–141 of 142 across versions, hold-out B, blind red-team batches (including 57 tasks written
+away from the examples' templates: 140 of 140) and the hard bench set (GSM-Hard, MBPP, MuSiQue,
+DABench).
 
 ## Build and run
 
+Input: a directory of task folders, each with `task.json` (`instruction`, `task_type`,
+`task_id`, `reward`) and, when the task has files, a `workspace/` folder. The model proxy is
+OpenAI-compatible and given by `LLM_BASE_URL` (for example `http://proxy:8000/v1`) and
+`LLM_API_KEY`. Output: `answer.txt` in every task folder the harness answers (details below).
+
 ```bash
 docker build -t hack:latest .
-mkdir -p "$OUT" && chmod 777 "$OUT"
+TASKS=/absolute/path/to/tasks   # the directory of task folders
 timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   --network hack-net -e LLM_BASE_URL -e LLM_API_KEY \
   -v "$TASKS:/data/tasks:rw" \
@@ -35,6 +41,15 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   --cpus 8 --memory 16g --pids-limit 512 \
   --workdir /app --entrypoint python \
   hack:latest /app/run_agent.py --tasks-dir /data/tasks
+```
+
+The image's default entry point does the same (`docker run ... hack:latest` runs
+`python /app/run_agent.py --tasks-dir /data/tasks`). Without Docker, on Linux x86-64 with
+Python 3.12:
+
+```bash
+pip install -r requirements.txt
+LLM_BASE_URL=... LLM_API_KEY=... python run_agent.py --tasks-dir /path/to/tasks
 ```
 
 - Base image `python:3.12.13-slim-bookworm` pinned by digest; `openjiuwen==0.1.20`; all
@@ -273,8 +288,8 @@ Detected without spending tokens where possible:
 Free verdicts are reserved for signals that cannot fire on a solvable task (checked on ten
 bench sets, including pairs of a solvable task and its minimally edited unsolvable twin:
 zero false verdicts):
-- data: columns announced in the exact form of the examples ("The file X has columns a,b,c
-  (N rows)") are missing from that file; every table is empty and the question asks for an
+- data: a column announced in the exact form of the examples ("The file X has columns a,b,c
+  (N rows)") is missing from that file and the question uses it; every table is empty and the question asks for an
   average or an extreme; no table exists at all where a file is named;
 - code: the tests contradict each other. A static check over the test file (no test code is
   executed — a tiny interpreter evaluates literals, comparisons and a few pure builtins)
@@ -438,7 +453,21 @@ Cost per task over all six sets above (one run each), by kind:
 | search | yes | 87 | 195 | 88 | 387 | 1.11 |
 | search | no | 30 | 227 | 130 | 520 | 1.47 |
 
-## Open questions to the organisers
+## What the organisers clarified (stream of 9 November)
 
-Handled defensively in the code: location of `answer.txt` (both places), `OUT` as file or
-directory, unknown budget, unknown answer for infeasible tasks.
+- The tasks of the final run are new and differ from the examples, and there are more of them
+  than the budget allows. The fast path is therefore only an accelerator; the general path
+  and the order of work (expected reward per token, cheapest certain answers first, each
+  answer written the moment it is ready) carry the score. The budget is counted outside the
+  container; the harness keeps its own count the same way and stops before it runs out.
+- Agents are expected to be built on openJiuwen: here every task is an openJiuwen `Workflow`
+  and every model call goes through openJiuwen's model client and rails.
+- Task folders are writable by the container's user; `answer.txt` is written into the task
+  folder and into its `workspace/`.
+- Answers are compared leniently (stripped, lowercased); numbers are written with exactly the
+  decimals a task asks for.
+- A wrong answer costs nothing more than no answer, and unsolvable tasks are not to be marked:
+  the harness writes no `answer.txt` for them.
+- `OUT` is no longer part of the contract; it is still honoured when given.
+- Code tasks are checked with a rewritten, extended test file, so fixes must be general: the
+  prompt asks the model to fix the real bug and not to special-case test inputs.
