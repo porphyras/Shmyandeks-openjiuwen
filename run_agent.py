@@ -684,8 +684,9 @@ def main(argv=None):
                 # alive and waiting: no model call has succeeded yet (the policy is to wait, not to quit)
                 from urllib.parse import urlparse
                 last_wait_note = time.time()
-                print("waiting for the model proxy at %s; %d answers already written"
-                      % (urlparse(run.llm.base_url).netloc or "LLM_BASE_URL", len(run.answers)),
+                u = urlparse(run.llm.base_url)
+                where = "%s:%s" % (u.hostname, u.port) if u.port else (u.hostname or "LLM_BASE_URL")  # no user:password
+                print("waiting for the model proxy at %s; %d answers already written" % (where, len(run.answers)),
                       file=sys.stderr, flush=True)
             if time.time() - T0 > run.time_limit + 60:
                 trace({"ev": "end", "watchdog": True})
