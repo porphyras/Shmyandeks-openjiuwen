@@ -154,6 +154,35 @@ class ContradictionTests(unittest.TestCase):
         self.assertEqual(self.problems("    def test_a(self):\n        r = m.make(3)\n        self.assertEqual(len(r), 3)\n"
                                        "        self.assertEqual(m.pop_last(r), 2)\n        self.assertEqual(len(r), 2)\n"), [])
 
+    def unproven(self, lib, body):
+        imp = ctx.impure_functions([lib]) | ctx.unproven_functions([lib])
+        return ctx.test_contradictions(self.HEAD + body, imp)
+
+    def test_state_the_analysis_cannot_rule_out(self):
+        two = "    def test_a(self):\n        self.assertEqual(m.{c}, 1)\n        self.assertEqual(m.{c}, 2)\n"
+        # a mutable default, a scalar rebound through global, a closure bound by assignment
+        self.assertEqual(self.unproven("def add(x, seen=[]):\n    seen.append(x)\n    return len(seen)\n",
+                                       two.format(c="add(1)")), [])
+        self.assertEqual(self.unproven("_MODE = 'a'\n\ndef set_mode(x):\n    global _MODE\n    _MODE = x\n\n"
+                                       "def label(s):\n    return _MODE + s\n", two.format(c="label('x')")), [])
+        self.assertEqual(self.unproven("def make_counter():\n    n = [0]\n    def f(x):\n        n[0] += x\n"
+                                       "        return n[0]\n    return f\n\nbump = make_counter()\n",
+                                       two.format(c="bump(1)")), [])
+        # a class attribute read by a function
+        self.assertEqual(self.unproven("class Config:\n    limit = 3\n\ndef top(s):\n    return s[:Config.limit]\n",
+                                       two.format(c="top('abcdef')")), [])
+
+    def test_writes_through_the_module_give_no_verdict(self):
+        for line in ("m.Config.limit = 2", "vars(m)['LIMIT'] = 2", "m.REG['a'] = 1", "importlib.reload(m)"):
+            body = ("    def test_a(self):\n        self.assertEqual(m.top('abc'), 'abc')\n        %s\n"
+                    "        self.assertEqual(m.top('abc'), 'ab')\n" % line)
+            self.assertEqual(self.problems(body), [], line)
+
+    def test_a_proven_pure_function_still_gives_a_verdict(self):
+        self.assertTrue(self.unproven("import math\nLIMIT = 3\n\ndef top(s):\n    return s[:LIMIT] + str(math.floor(1.5))\n",
+                                      "    def test_a(self):\n        self.assertEqual(m.top('abcdef'), 'abc1')\n"
+                                      "    def test_b(self):\n        self.assertEqual(m.top('abcdef'), 'ab1')\n"))
+
     def test_return_and_raise(self):
         self.assertTrue(self.problems("    def test_a(self):\n        self.assertEqual(m.total([]), 0)\n"
                                       "    def test_b(self):\n        self.assertRaises(ValueError, m.total, [])\n"))

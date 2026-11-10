@@ -488,7 +488,8 @@ class Solver:
         if not srcs:
             info["problems"].append("no source files")
             return
-        impure = ctx.impure_functions(info["src_orig"].values())
+        # "impure until proven otherwise": state the analysis cannot rule out disables a verdict
+        impure = ctx.impure_functions(info["src_orig"].values()) | ctx.unproven_functions(info["src_orig"].values())
         for tp in tests:
             tsrc = ctx.read_text(tp, 1 << 20)
             info["problems"] += ctx.test_contradictions(tsrc, impure)

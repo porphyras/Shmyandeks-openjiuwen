@@ -878,6 +878,122 @@ _MUTATORS = {"append", "extend", "insert", "pop", "remove", "clear", "update", "
              "setdefault", "popitem", "sort", "reverse", "write", "seek", "send", "__setitem__"}
 
 
+# Modules whose functions build values from their arguments (no hidden state, no clock).
+_PURE_MODULES = {"math", "re", "string", "datetime", "decimal", "fractions", "statistics", "functools",
+                 "collections", "itertools", "operator", "json", "copy", "textwrap", "unicodedata", "cmath"}
+import builtins as builtins_mod  # noqa: E402
+_SAFE_BUILTIN_NAMES = {"ValueError", "TypeError", "KeyError", "IndexError", "ZeroDivisionError", "Exception",
+                       "ArithmeticError", "OverflowError", "RuntimeError", "NotImplementedError", "AssertionError",
+                       "isinstance", "issubclass", "callable", "getattr", "hasattr", "iter", "next", "print"}
+
+
+def unproven_functions(sources):
+    """Module-level names a test may call that are NOT provably pure, for the contradiction
+    checks ("impure until proven otherwise"). A call m.f(...) counts as pure only if f is a plain
+    module-level def (no decorator, no mutable default) whose body reads only its parameters,
+    its locals, pure builtins, functions of _PURE_MODULES, other provably pure defs and scalar
+    constants that are bound once and never rebound (global) or written through an attribute or
+    index anywhere; Name.attr on module data (Config.limit) is not pure. Everything else bound at
+    module level (classes, names bound by assignment such as bump = make_counter(), defs that do
+    not qualify) is returned."""
+    out = set()
+    for src in sources:
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        defs, others, pure_imports = {}, set(), {}
+        bindings = collections.Counter()
+        scalar = set()
+        for n in tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if n.name in defs:
+                    others.add(n.name)  # defined twice
+                defs[n.name] = n
+            elif isinstance(n, ast.ClassDef):
+                others.add(n.name)
+            elif isinstance(n, ast.Import):
+                for a in n.names:
+                    root = a.name.split(".")[0]
+                    if root in _PURE_MODULES:
+                        pure_imports[a.asname or root] = root
+                    else:
+                        others.add(a.asname or root)
+            elif isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    if (n.module or "").split(".")[0] in _PURE_MODULES:
+                        pure_imports[a.asname or a.name] = n.module
+                    else:
+                        others.add(a.asname or a.name)
+            elif isinstance(n, ast.Assign):
+                for t in n.targets:
+                    for x in ast.walk(t):
+                        if isinstance(x, ast.Name):
+                            bindings[x.id] += 1
+                            if isinstance(t, ast.Name) and _scalar_literal(n.value):
+                                scalar.add(x.id)
+            elif isinstance(n, (ast.AnnAssign, ast.AugAssign)):
+                for x in ast.walk(n.target):
+                    if isinstance(x, ast.Name):
+                        bindings[x.id] += 2
+        # names written anywhere through global/nonlocal, attribute or index
+        rebound = set()
+        for x in ast.walk(tree):
+            if isinstance(x, (ast.Global, ast.Nonlocal)):
+                rebound.update(x.names)
+            elif isinstance(x, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+                targets = x.targets if isinstance(x, (ast.Assign, ast.Delete)) else [x.target]
+                for t in targets:
+                    if isinstance(t, (ast.Attribute, ast.Subscript)):
+                        r = t
+                        while isinstance(r, (ast.Attribute, ast.Subscript)):
+                            r = r.value
+                        if isinstance(r, ast.Name):
+                            rebound.add(r.id)
+        constants = {nm for nm in scalar if bindings[nm] == 1 and nm not in rebound}
+        others |= {nm for nm in bindings if nm not in constants and nm not in defs}
+        cand = set()
+        for name, fn in defs.items():
+            if fn.decorator_list or name in others:
+                continue
+            defaults = list(fn.args.defaults) + [d for d in fn.args.kw_defaults if d is not None]
+            if any(not _scalar_literal(d) for d in defaults):
+                continue  # def add(x, seen=[]): the default keeps state between calls
+            if any(isinstance(x, (ast.Global, ast.Nonlocal, ast.Yield, ast.YieldFrom)) for x in ast.walk(fn)):
+                continue
+            cand.add(name)
+        changed = True
+        while changed:  # drop defs reading anything not proven pure
+            changed = False
+            for name in sorted(cand):
+                fn = defs[name]
+                params = {a.arg for a in fn.args.args + fn.args.kwonlyargs + fn.args.posonlyargs}
+                if fn.args.vararg:
+                    params.add(fn.args.vararg.arg)
+                if fn.args.kwarg:
+                    params.add(fn.args.kwarg.arg)
+                local = params | {x.id for x in ast.walk(fn) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store)}
+                local |= {x.name for x in ast.walk(fn) if isinstance(x, ast.FunctionDef) and x is not fn}
+                ok = True
+                for x in ast.walk(fn):
+                    if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load) and x.id not in local:
+                        if x.id in cand or x.id in constants or x.id in pure_imports or x.id in _PURE_BUILTINS \
+                                or x.id in ("True", "False", "None") or hasattr(builtins_mod, x.id) and x.id in _SAFE_BUILTIN_NAMES:
+                            continue
+                        ok = False
+                        break
+                    if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id not in local \
+                            and x.value.id not in pure_imports:
+                        ok = False  # Config.limit, REGISTRY.items: module data read through an attribute
+                        break
+                if not ok:
+                    cand.discard(name)
+                    changed = True
+        out |= set(defs) - cand
+        out |= others
+    return out
+
+
 def _scalar_literal(node):
     """A constant that is a scalar or a tuple of scalars (LIMIT = 3, SEP = '-', AXES = ('x', 'y'))."""
     try:
@@ -1079,9 +1195,16 @@ def _patches_module(tree, mods):
             if last in ("patch", "object", "dict", "multiple", "setattr", "setitem", "delattr", "setenv") and (
                     "patch" in name or last in ("setattr", "setitem", "delattr", "setenv")):
                 return True
-        if isinstance(n, (ast.Assign, ast.AugAssign)):
-            for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
-                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in mods:
+            if last in ("vars", "globals", "reload", "exec", "eval", "__import__"):
+                return True  # vars(m)['LIMIT'] = 2, importlib.reload(m), ...
+        if isinstance(n, ast.Attribute) and n.attr == "__dict__":
+            return True
+        if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+            for t in (n.targets if isinstance(n, (ast.Assign, ast.Delete)) else [n.target]):
+                r = t  # any write through the module: m.X = 2, m.Config.limit = 2, m.REG[...] = ...
+                while isinstance(r, (ast.Attribute, ast.Subscript)):
+                    r = r.value
+                if r is not t and isinstance(r, ast.Name) and r.id in mods:
                     return True
     return False
 

@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "134b31d388b066c1c7cebd294d31d028308ea3d30245176472db4c352f492696"
+      "sha256": "f7b96039d1da377942cb192d7d9edebd190196bd5d7490b2ac397d2b4d5c9a85"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "d121919f6f6429740c659a73bc51eff0d22f9fa9da67eff6a614979ea03c0bd2"
+      "sha256": "782907e00b7bea166a072fe24d36b835b79856ff5b859b63fcb154be61f7dde0"
     },
     {
       "id": "fast",
@@ -69,9 +69,11 @@ an empty suite cannot establish success. Test contradictions do not infer
 permutation invariance from function names alone. They also catch a pure call
 required to be both true and false, a builtin over one (len(f(x)) as 3 and 4) and a
 result kept in a variable that nothing else touches before the assertions. A function
-reading module data other than a scalar constant is never pure (a registry filled between
-two assertions), and a test that patches the module (mock.patch, setattr, m.X = ...) gives
-no verdict.[^solver][^context]
+counts as pure only when proven so (unproven_functions): a plain module-level def without
+decorators or mutable defaults that reads only its arguments, pure builtins and modules,
+other proven defs and scalar constants never rebound; registries, globals, class
+attributes and closures disable the verdict. A test that writes through the module
+(mock.patch, setattr, m.A.b = ..., vars(m), reload) gives none.[^solver][^context]
 
 fastpath answers only recognized task forms. A new form must have tests against
 nearby unsupported or ambiguous wording. crossfix reuses definitions that passed
