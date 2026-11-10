@@ -27,7 +27,7 @@
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "8881824659d6dcc3f55bbe529de3bb299caba230317cd96b53e61db5a875645a"
+      "sha256": "9c741f0fd893ac2ae3b151416c5a62385cb8ef34b2ff4a861c6a7d49a2a0aba8"
     },
     {
       "id": "fast",
@@ -66,7 +66,9 @@ A test-success verdict controls DONE; it is not proof of hidden-test correctness
 Inspect _run_tests_once when extending supported test styles.[^solver]
 It discovers unittest classes without a main entry point and plain test functions;
 an empty suite cannot establish success. Test contradictions do not infer
-permutation invariance from function names alone.[^solver][^context]
+permutation invariance from function names alone. They also catch a pure call
+required to be both true and false, a builtin over one (len(f(x)) as 3 and 4) and a
+result kept in a variable that nothing else touches before the assertions.[^solver][^context]
 
 fastpath answers only recognized task forms. A new form must have tests against
 nearby unsupported or ambiguous wording. crossfix reuses definitions that passed

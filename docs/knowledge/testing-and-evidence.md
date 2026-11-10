@@ -41,7 +41,7 @@
     {
       "id": "tests",
       "resource": "../../tests/test_free_verdicts.py",
-      "sha256": "373a7167495997fe843cc8bbbbe479c46aaf1d98c6d6390e03d1dc9e01771e03"
+      "sha256": "aef56fa74059e712e67f79e24a42ea966c12c7155a6d66b9df14ca73f1e155f4"
     }
   ]
 }

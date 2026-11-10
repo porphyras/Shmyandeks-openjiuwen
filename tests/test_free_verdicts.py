@@ -99,6 +99,29 @@ class ContradictionTests(unittest.TestCase):
         self.assertTrue(self.problems("    def test_a(self):\n        self.assertEqual(m.total([1, 2]), 3)\n"
                                       "    def test_b(self):\n        self.assertEqual(m.total([1, 2]), 4)\n"))
 
+    def test_true_and_false(self):
+        self.assertTrue(self.problems("    def test_a(self):\n        self.assertTrue(m.is_even(4))\n"
+                                      "    def test_b(self):\n        self.assertFalse(m.is_even(4))\n"))
+
+    def test_builtin_over_a_call(self):
+        self.assertTrue(self.problems("    def test_a(self):\n        self.assertEqual(len(m.split('a b c')), 3)\n"
+                                      "    def test_b(self):\n        self.assertEqual(len(m.split('a b c')), 4)\n"))
+
+    def test_result_kept_in_a_variable(self):
+        self.assertTrue(self.problems("    def test_a(self):\n        r = m.square(3)\n        self.assertEqual(r, 9)\n"
+                                      "    def test_b(self):\n        self.assertEqual(m.square(3), 10)\n"))
+
+    def test_a_changed_variable_is_not_the_call(self):
+        self.assertEqual(self.problems(
+            "    def test_a(self):\n        r = m.items(3)\n        r.append(1)\n        self.assertEqual(len(r), 4)\n"
+            "    def test_b(self):\n        self.assertEqual(len(m.items(3)), 3)\n"), [])
+        self.assertEqual(self.problems(
+            "    def test_a(self):\n        r = m.items(3)\n        self.assertEqual(r.pop(), 3)\n"
+            "        self.assertEqual(len(r), 2)\n"
+            "    def test_b(self):\n        self.assertEqual(len(m.items(3)), 3)\n"), [])
+        self.assertEqual(self.problems("    def test_a(self):\n        self.assertTrue(m.count(4))\n"
+                                       "    def test_b(self):\n        self.assertEqual(m.count(4), 1)\n"), [])
+
     def test_return_and_raise(self):
         self.assertTrue(self.problems("    def test_a(self):\n        self.assertEqual(m.total([]), 0)\n"
                                       "    def test_b(self):\n        self.assertRaises(ValueError, m.total, [])\n"))

@@ -633,6 +633,23 @@ def kb_fallback_text(task, small=20000, limit=12000, hint="", own_articles=0):
     return prose_passages(kb_docs(task), task.short_instruction(), limit, extra=hint, own_articles=own_articles)
 
 
+def kb_bytes(task, max_files=3000):
+    """Bytes of the task's files (the knowledge base of a search task); bounded walk."""
+    total, n = 0, 0
+    for dp, _, fs in os.walk(task.cwd):
+        for f in fs:
+            if f == "answer.txt":
+                continue
+            n += 1
+            if n > max_files:
+                return total
+            try:
+                total += os.path.getsize(os.path.join(dp, f))
+            except OSError:
+                pass
+    return total
+
+
 def kb_full_text(task, limit=MAX_KB_CTX):
     docs = kb_docs(task)
     text = "\n".join(_fmt_doc(r, t) for r, t in docs)
@@ -936,6 +953,66 @@ def impure_functions(sources):
                 changed = True
     return out
 
+_WRAPPERS = {"len", "sorted", "set", "str", "abs", "sum", "min", "max", "list", "tuple", "bool"}
+
+
+def _expr_key(node, mods, funcs, impure):
+    """A key for a pure call, or for a builtin applied to one (len(m.split('a b'))); else None."""
+    if _pure_call(node, mods, funcs, impure):
+        return _call_key(node)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _WRAPPERS \
+            and len(node.args) == 1 and not node.keywords and _pure_call(node.args[0], mods, funcs, impure):
+        inner = _call_key(node.args[0])
+        return None if inner is None else ("wrap", node.func.id, inner)
+    return None
+
+
+def _is_assert(st):
+    return isinstance(st, ast.Assert) or (isinstance(st, ast.Expr) and isinstance(st.value, ast.Call) and
+                                          isinstance(st.value.func, ast.Attribute) and
+                                          st.value.func.attr.startswith("assert"))
+
+
+def _substitute_pure_vars(tree, mods, funcs, impure):
+    """In each test function, `r = m.f(<literals>)` followed only by assertions that read r
+    (never r.method(...), never a reassignment, never any other statement naming r): the
+    assertions are rewritten with the call itself, so the checks below compare it with the same
+    call elsewhere. Anything that could change r ends the substitution."""
+    import copy
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        live = {}
+        for st in fn.body:
+            names = {x.id for x in ast.walk(st) if isinstance(x, ast.Name)}
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name):
+                v = st.targets[0].id
+                live.pop(v, None)
+                for other in list(live):
+                    if other in names:
+                        live.pop(other)
+                if _pure_call(st.value, mods, funcs, impure):
+                    live[v] = st.value
+                continue
+            if not _is_assert(st):
+                for v in list(live):
+                    if v in names:
+                        live.pop(v)
+                continue
+            # r.method(...) or r.attr inside the assertion may change or depend on r's identity
+            touched = {x.value.id for x in ast.walk(st) if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name)}
+            for v in list(live):
+                if v in touched:
+                    live.pop(v)
+
+            class Sub(ast.NodeTransformer):
+                def visit_Name(self, node):
+                    if isinstance(node.ctx, ast.Load) and node.id in live:
+                        return copy.deepcopy(live[node.id])
+                    return node
+            Sub().visit(st)
+
+
 def test_contradictions(src, impure=frozenset()):
     """Find assertions that no implementation can satisfy together: the same call required to
     equal two different literals, or a property of a call contradicting its required value."""
@@ -944,11 +1021,13 @@ def test_contradictions(src, impure=frozenset()):
     except SyntaxError:
         return []
     mods, funcs = _target_names(tree)
+    _substitute_pure_vars(tree, mods, funcs, impure)
     asserts = []
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr.startswith("assert"):
             asserts.append(n)
     known, problems, almost = {}, [], {}
+    wrapped, truth = {}, {}
     for n in asserts:
         if n.func.attr == "assertAlmostEqual" and len(n.args) >= 2 and _pure_call(n.args[0], mods, funcs, impure):
             ok, val = _lit(n.args[1])
@@ -976,6 +1055,22 @@ def test_contradictions(src, impure=frozenset()):
                         problems.append("%s expected both %r and %r" % (ast.unparse(call), known[key], val))
                     known.setdefault(key, val)
                     break
+                wkey = _expr_key(call, mods, funcs, impure) if ok else None
+                if wkey is not None and wkey[0] == "wrap":
+                    # len(m.f(x)) required to be 3 and 4
+                    if wkey in wrapped and wrapped[wkey] != val and type(wrapped[wkey]) is type(val):
+                        problems.append("%s expected both %r and %r" % (ast.unparse(call)[:80], wrapped[wkey], val))
+                    wrapped.setdefault(wkey, val)
+                    break
+        if n.func.attr in ("assertTrue", "assertFalse") and len(n.args) >= 1 and \
+                _pure_call(n.args[0], mods, funcs, impure) and _call_key(n.args[0]) is not None:
+            key, want = _call_key(n.args[0]), n.func.attr == "assertTrue"
+            if key in truth and truth[key] != want:
+                problems.append("%s required to be both true and false" % ast.unparse(n.args[0])[:80])
+            truth.setdefault(key, want)
+    for key, want in truth.items():
+        if key in known and type(known[key]) in (bool, int, str, list, tuple, dict, set) and bool(known[key]) != want:
+            problems.append("a call required to equal %r and to be %s" % (known[key], "true" if want else "false"))
     problems += _raise_contradictions(tree, asserts, known, mods, funcs, impure)
     # Different permutations are different inputs. A name such as maximum_profit,
     # total_distance or count_switches cannot prove that their results must match.
