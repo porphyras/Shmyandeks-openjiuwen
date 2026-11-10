@@ -719,8 +719,16 @@ def extract_functions(src, names):
 
 # ---------------------------------------------------------------- test contradictions
 
+def _small_range(*a):
+    r = range(*a)
+    if len(r) > 100000:
+        raise ValueError("range too large to evaluate")
+    return r
+
+
 _SAFE_FUNCS = {"len": len, "sorted": sorted, "abs": abs, "min": min, "max": max, "sum": sum, "set": set,
-               "list": list, "tuple": tuple, "str": str, "int": int, "float": float, "bool": bool, "round": round}
+               "list": list, "tuple": tuple, "str": str, "int": int, "float": float, "bool": bool, "round": round,
+               "range": _small_range, "dict": dict}
 
 
 def _lit(node):
@@ -1148,6 +1156,24 @@ def _raise_contradictions(tree, asserts, known, mods, funcs, impure):
         val = st.value if isinstance(st, (ast.Expr, ast.Assign)) else None
         if isinstance(val, ast.Call):
             raising.append(val)
+    # Calls an assertion expects to return (any value: assertEqual(f(x), date(2023, 3, 1)),
+    # assertTrue(f(x)), ...), outside `with assertRaises` blocks.
+    inside = set()
+    for w in ast.walk(tree):
+        if isinstance(w, (ast.With, ast.AsyncWith)) and any(
+                isinstance(i.context_expr, ast.Call) and isinstance(i.context_expr.func, ast.Attribute) and
+                i.context_expr.func.attr in ("assertRaises", "assertRaisesRegex", "raises", "assertWarns")
+                for i in w.items):
+            inside.update(id(x) for st in w.body for x in ast.walk(st))
+    returning = {}
+    for n in asserts:
+        if id(n) in inside or n.func.attr.startswith(("assertRaises", "assertWarns")):
+            continue
+        for a in n.args:
+            if _pure_call(a, mods, funcs, impure):
+                k = _call_key(a)
+                if k is not None:
+                    returning.setdefault(k, a)
     out = []
     for call in raising:
         if any(k.arg for k in getattr(call, "keywords", [])):
@@ -1157,6 +1183,8 @@ def _raise_contradictions(tree, asserts, known, mods, funcs, impure):
         key = _call_key(call)
         if key is not None and key in known:
             out.append("%s must both return %r and raise" % (ast.unparse(call)[:80], known[key]))
+        elif key is not None and key in returning:
+            out.append("%s must both return a value and raise" % ast.unparse(call)[:80])
     return out
 
 

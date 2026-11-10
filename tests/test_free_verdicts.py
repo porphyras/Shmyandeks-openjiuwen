@@ -111,6 +111,20 @@ class ContradictionTests(unittest.TestCase):
         self.assertTrue(self.problems("    def test_a(self):\n        r = m.square(3)\n        self.assertEqual(r, 9)\n"
                                       "    def test_b(self):\n        self.assertEqual(m.square(3), 10)\n"))
 
+    def test_builtin_arguments(self):
+        self.assertTrue(self.problems("    def test_a(self):\n        r = m.chunk(list(range(10)), 3)\n"
+                                      "        self.assertEqual(len(r), 3)\n        self.assertEqual(len(r), 4)\n"))
+        self.assertEqual(self.problems("    def test_a(self):\n        self.assertEqual(m.f(list(range(10**9))), 1)\n"
+                                       "        self.assertEqual(m.f(list(range(10**9))), 2)\n"), [])
+
+    def test_raise_and_return_any_value(self):
+        self.assertTrue(self.problems("    def test_a(self):\n        with self.assertRaises(ValueError):\n"
+                                      "            m.parse('2023-02-29')\n    def test_b(self):\n"
+                                      "        self.assertEqual(m.parse('2023-02-29'), m.make(2023, 3, 1))\n"))
+        self.assertEqual(self.problems("    def test_a(self):\n        with self.assertRaises(ValueError):\n"
+                                       "            self.assertEqual(m.parse('x'), 1)\n    def test_b(self):\n"
+                                       "        self.assertEqual(m.parse('2023-01-01'), 5)\n"), [])
+
     def test_a_changed_variable_is_not_the_call(self):
         self.assertEqual(self.problems(
             "    def test_a(self):\n        r = m.items(3)\n        r.append(1)\n        self.assertEqual(len(r), 4)\n"
