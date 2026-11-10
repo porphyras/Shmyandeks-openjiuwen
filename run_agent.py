@@ -246,6 +246,14 @@ class Run:
                "note": outcome.note, "cost": round(self.cost.get(task.name, 0.0), 1),
                "spent": round(self.llm.spent, 1)})
 
+    def say_done(self, why=""):
+        """One human-readable line at the end of a run (also when stopped by a signal or the clock)."""
+        written = sum(1 for d in list(self.answers) if os.path.isfile(os.path.join(d, "answer.txt")) or
+                      os.path.isfile(os.path.join(d, "workspace", "answer.txt")))
+        print("Done%s: %d tasks, %d answers written to the task folders, %.0f budget units spent in %d model calls."
+              % (" (%s)" % why if why else "", getattr(self, "ntasks", 0), written, self.llm.spent, self.llm.calls),
+              file=sys.stderr, flush=True)
+
     def check_writable(self, tasks):
         """A probe file in the first task folder: answers must land there. If the folder is not
         writable for this process (root without CAP_DAC_OVERRIDE on a host directory), say so
@@ -310,6 +318,7 @@ class Run:
         from harness.solver import Outcome
 
         tasks = load_tasks(self.tasks_dir)
+        self.ntasks = len(tasks)
         # Small sets (the qualification run has 2 tasks) are solved "for sure": every answer
         # without a free check gets an independent second opinion.
         self.careful = len(tasks) <= int(env_float("HARNESS_CAREFUL_MAX", 10))
@@ -538,10 +547,7 @@ class Run:
             pool()
             self.rewrite_answers()
         executor.shutdown(wait=False)
-        written = sum(1 for d in self.answers if os.path.isfile(os.path.join(d, "answer.txt")) or
-                      os.path.isfile(os.path.join(d, "workspace", "answer.txt")))
-        print("Done: %d tasks, %d answers written to the task folders, %.0f budget units spent in %d model calls."
-              % (len(tasks), written, self.llm.spent, self.llm.calls), file=sys.stderr, flush=True)
+        self.say_done()
         trace({"ev": "end", "spent": round(self.llm.spent, 1), "calls": self.llm.calls,
                "by_model": self.llm.by_model, "results": _count(self.results.values()),
                "elapsed": round(time.time() - T0, 1)})
@@ -584,6 +590,9 @@ def take_key():
     return key
 
 
+CURRENT_RUN = []  # the Run, for a summary line when a signal ends the process
+
+
 def install_signals():
     """SIGTERM/SIGINT end the run at once (answers are on disk already). Signals sent by the
     programs we run on the model's behalf are ignored."""
@@ -592,6 +601,11 @@ def install_signals():
     def die(signum):
         STOP.set()
         trace({"ev": "end", "signal": signum})
+        try:
+            if CURRENT_RUN:
+                CURRENT_RUN[0].say_done("stopped by signal %d" % signum)
+        except Exception:
+            pass
         os._exit(0)
 
     sigs = {signal.SIGTERM, signal.SIGINT}
@@ -628,6 +642,7 @@ def main(argv=None):
     configure_openjiuwen_logging()
 
     run = Run(args, key)
+    CURRENT_RUN.append(run)
 
     def watchdog():  # never overrun the hour, whatever a worker is blocked on
         while True:
@@ -636,6 +651,7 @@ def main(argv=None):
                 trace({"ev": "end", "watchdog": True})
                 try:
                     run.rewrite_answers()
+                    run.say_done("time limit")
                 finally:
                     os._exit(0)
 

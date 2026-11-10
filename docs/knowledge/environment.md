@@ -36,12 +36,12 @@
     {
       "id": "llm",
       "resource": "../../harness/llm.py",
-      "sha256": "91efe2fc9713ba3f62737f153e6cf06ab94bea46c2ba621ed941c1f3cd86b7c2"
+      "sha256": "cc045e324231bd6f7ec6f3ed86af2bed0aa057802250b90a20011eb496036fb7"
     },
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "a417a829eee7d6ac9f379b75fb8d86f5a4c84469b3931a464a6caa17394657c9"
+      "sha256": "934295ab9fddc76e1f180957fdf5782e4b0f6a1659fbe2006a54107af2946b9f"
     },
     {
       "id": "deps",
@@ -70,7 +70,9 @@ Avoid importing the SDK before logging configuration when changing startup.[^run
 Run probes the first task folder with a temporary file before any work: a task
 directory the container's user cannot write (root without capabilities on a host
 folder) is reported on stderr at once, and the run ends with a one-line summary
-of answers written and units spent.[^run]
+of answers written and units spent, also when a signal or the time limit stops
+it. The first failed proxy call prints one hint about LLM_BASE_URL/LLM_API_KEY
+(the error text stays in the trace, where the key is redacted).[^run][^llm]
 
 sandbox.py defines the interpreter, clean environment, subprocess launcher,
 timeouts, output capture and resource limits. Model programs execute in task

@@ -43,7 +43,19 @@ class LLM:
         self.base_url = normalize_base(base_url)
         self.api_key = api_key
         self.budget = budget
-        self.log = log or (lambda rec: None)
+        inner_log = log or (lambda rec: None)
+        self._warned_proxy = False
+
+        def log_and_warn(rec):
+            inner_log(rec)
+            if rec.get("ev") == "llm_error" and rec.get("kind") in ("transient", "fatal") and not self._warned_proxy:
+                self._warned_proxy = True
+                import sys
+                # (the error text is in the trace, where the key is redacted; not repeated here)
+                print("WARNING: a call to the model proxy failed; retrying. Check that LLM_BASE_URL is reachable "
+                      "from the container (it usually ends in /v1) and that LLM_API_KEY is set.",
+                      file=sys.stderr, flush=True)
+        self.log = log_and_warn
         if loop is None:
             loop = asyncio.new_event_loop()
             threading.Thread(target=loop.run_forever, name="llm-loop", daemon=True).start()

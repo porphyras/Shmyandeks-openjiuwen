@@ -53,13 +53,15 @@ to stderr at the start. At the end it prints one line such as `Done: 8 tasks, 8 
 to the task folders, 506 budget units spent in 18 model calls.` (the JSON lines before it are
 progress events).
 
-A local try without the organisers' network: give a proxy the container can reach (on Docker
-Desktop the host is `host.docker.internal`) and drop `--network`. The image's default entry
-point runs `python /app/run_agent.py --tasks-dir /data/tasks`:
+A local try without the organisers' network: give a proxy the container can reach (the host is
+`host.docker.internal`; on a Linux Docker engine the `--add-host` line makes that name work) and
+drop `--network`. The image's default entry point runs `python /app/run_agent.py --tasks-dir
+/data/tasks`:
 
 ```bash
 export LLM_BASE_URL=http://host.docker.internal:8000/v1 LLM_API_KEY=your-key
 docker run --rm -e LLM_BASE_URL -e LLM_API_KEY -v "$TASKS:/data/tasks:rw" \
+  --add-host=host.docker.internal:host-gateway \
   --read-only --tmpfs /tmp:rw,size=2g -e HOME=/tmp \
   --cap-drop ALL --security-opt no-new-privileges hack:latest
 ```
