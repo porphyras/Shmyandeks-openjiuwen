@@ -245,6 +245,12 @@ answer without a free check gets an independent second opinion.
   answer stops new calls. Everything solved is already on disk at any moment.
 - Economy mode: when a known budget is less than 1.25× the forecast of the whole queue, second
   opinions and reasoning retries are switched off so that first passes get the budget.
+- Phase 2: when the queue is done and more than 20 % of a known budget is left, a task the model
+  refused (NOT FOUND / IMPOSSIBLE, never a free verdict or a code task) gets one more look on the
+  reasoning rung, best reward per cost first, spending at most 15 % of the budget; an answer is
+  never replaced. On three bench sets at full budget it added 5 points for ~27k units and gave no
+  answer to any of the infeasible tasks it rechecked. Under a binding budget the queue never
+  empties, so it does not run. `HARNESS_PHASE2=0` turns it off.
 - A call is never shortened to fit what is left of the budget: a reply cut at `max_tokens` is
   usually unusable and is still billed. Instead a call whose forecast exceeds the remainder is
   not made (the task is skipped), and the planner reserves the forecasts of tasks in flight.
@@ -296,6 +302,13 @@ it from what the free inspection already measured; it never needs a call to lear
   73 % on one hop, 57 → 71 % on three) yet scored lower on the real proxy (46–48 vs 52–54 of 73
   there, 33 vs 36–41 of 41 on large prose bases): the extra paragraphs it brings are near
   namesakes that mislead the model. Whole-word BM25 stays; `bench/tools/retrieval_r01.py`.
+- **Large knowledge bases:** the excerpt sent to the model is capped, so its length does not see
+  the size of the base. Over the bench runs a search over a base of 20 KB or more cost 2.2–2.9×
+  its forecast in every family of sets (r01 2.87, large prose 2.29, others 2.23), a smaller base
+  0.92–1.01× (the official examples and template sets are 2–15 KB). Such a search's forecast and
+  p90 are multiplied by 2.5 (`HARNESS_KB_SCALE=0` turns it off). On a mixed set of 183 tasks under
+  a third of its full cost (22k units) this moved expensive searches to the back of the queue:
+  309 and 301 points against 282 and 286 without it; at full budget nothing changes.
 - **Under a budget** (offline replay of real traces, `bench/tools/budget_sim.py`): on the hard set,
   which costs ~33k units unlimited, the policy reaches 79 / 88 / 98 / 100 % of a 0/1-knapsack
   oracle that knows every outcome at 10k / 20k / 30k / 40k units.

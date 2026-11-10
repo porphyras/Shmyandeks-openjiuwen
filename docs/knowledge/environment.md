@@ -58,7 +58,10 @@
 ---
 # Execution environment and SDK boundary
 
-Dockerfile owns the image and installation; requirements.in names direct packages,
+Dockerfile owns the image and installation; its ENV turns off model-hub downloads
+and telemetry exporters of SDK paths the harness never calls (HF_*_OFFLINE, OTEL_*).
+While no model call has succeeded, a line on stderr each minute says the run is
+waiting for the proxy (the policy is to wait, not to quit). requirements.in names direct packages,
 and requirements.txt locks the resolved graph. Consult the files for versions.
 Only run_agent.py, harness/ and build dependencies are copied into the image;
 .dockerignore excludes developer docs, skills, tools, tests and bench artifacts.[^docker][^ignore][^deps][^lock]

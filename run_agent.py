@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import argparse  # noqa: E402
 import heapq  # noqa: E402
 import math  # noqa: E402
+import re  # noqa: E402
 import itertools  # noqa: E402
 import json  # noqa: E402
 import signal  # noqa: E402
@@ -46,6 +47,8 @@ COST_FIT = {"math": (67.5, 0.1191, 40.1, 1.78), "data": (13.8, 0.1086, 30.5, 1.9
             "search": (18.1, 0.0285, 19.2, 3.15), "coding": (-34.4, 0.1178, 49.5, 1.94)}
 # search: log(cost) = a + b*log(1+chars) + c*prose for the median, then the same for the p90
 SEARCH_FIT = (-1.234, 0.75, 0.1, 2.499, 0.375, 0.6)
+KB_LARGE, KB_LARGE_FACTOR = 20 * 1024, 2.5  # search over a knowledge base of 20 KB or more
+PHASE2_SHARE = 0.15  # phase 2 (refusals rechecked on the reasoning rung) spends at most this share
 REASONING_MAX_TOKENS = 1500
 
 
@@ -114,6 +117,12 @@ class Run:
         self.workers = max(1, min(5, args.workers or int(env_float("HARNESS_WORKERS", 5))))
         self.infeasible_answer = os.environ.get("HARNESS_INFEASIBLE_ANSWER", "")
         self.second_pass = os.environ.get("HARNESS_SECOND_PASS", "1") == "1"
+        # Phase 2: when the queue is done and budget is left, a model refusal (not a free verdict)
+        # gets one more look on the reasoning rung. An answer is never replaced.
+        self.phase2 = os.environ.get("HARNESS_PHASE2", "1") == "1"
+        self.phase2_from = None  # spend when phase 2 began
+        self.kb_scale = os.environ.get("HARNESS_KB_SCALE", "1") == "1"
+        self.notes = {}
         # Kinds whose failed checks get one more try on the reasoning model: code fixes (rescued
         # 3 of 4 on the hard set) and data programs that crashed twice (rare, but then a sure loss).
         self.retry_kinds = set(k for k in os.environ.get("HARNESS_RETRY_FAILED", "coding,data").split(",") if k)
@@ -159,6 +168,9 @@ class Run:
             cap = 0.15 * self.llm.budget if self.llm.budget else env_float("HARNESS_REASONING_CAP", 15000.0)
             if spent_r + max_tokens * 0.5 > cap:
                 raise SkipTask()
+        if self.phase2_from is not None and self.llm.budget and \
+                self.llm.spent - self.phase2_from > PHASE2_SHARE * self.llm.budget:
+            raise SkipTask()  # phase 2 spends at most its share of the budget (ties go to the cheaper run)
         rem = self.llm.remaining()
         if rem is not None:
             est = sum(len(str(m.get("content", ""))) for m in messages) / 33.0 + min(max_tokens, 300) * 0.4
@@ -192,6 +204,12 @@ class Run:
             prose = 0.0 if info.get("kb_cards", True) else 1.0
             cost = math.exp(SEARCH_FIT[0] + SEARCH_FIT[1] * x + SEARCH_FIT[2] * prose)
             info["cost_p90"] = max(cost, math.exp(SEARCH_FIT[3] + SEARCH_FIT[4] * x + SEARCH_FIT[5] * prose))
+            if self.kb_scale and info.get("kb_bytes", 0) >= KB_LARGE:
+                # The excerpt is capped, so the forecast does not see a large base; over the bench
+                # runs a search over a base of 20 KB or more cost 2.3-3.4x its forecast (smaller
+                # bases: 0.98x), from the second and entity looks such a base needs.
+                cost *= KB_LARGE_FACTOR
+                info["cost_p90"] *= KB_LARGE_FACTOR
         p = PRIOR_P.get(kind, 0.6)
         if info.get("problems"):
             p *= 0.05
@@ -237,6 +255,7 @@ class Run:
                 self.say_write_failed(task.dir)
             self.summary.record(task.id, ans)
         self.results[task.name] = outcome.status
+        self.notes[task.name] = outcome.note or ""
         est = self.estimates.get(task.name)
         if est is not None:
             est["actual"] = round(self.cost.get(task.name, 0.0), 1)
@@ -546,6 +565,19 @@ class Run:
                 heapq.heappush(heap, (-(t.reward * 0.3 / max(info.get("cost", 100) * 4, 1.0)), next(seq), 2, t))
             pool()
             self.rewrite_answers()
+        rem = self.llm.remaining()
+        if self.phase2 and not self.llm.exhausted and not STOP.is_set() and self.time_left() > 180 and \
+                (rem is None or rem > 0.2 * (self.llm.budget or 0)):
+            refused = [t for t in tasks if self.results.get(t.name) == "infeasible" and t.kind != "coding"
+                       and re.match(r"(model: impossible|program: impossible|not found in kb)", self.notes.get(t.name, ""))]
+            trace({"ev": "phase2", "tasks": len(refused), "remaining": rem})
+            self.phase2_from = self.llm.spent
+            for t in refused:
+                info = infos.get(t.name) or {}
+                heapq.heappush(heap, (-(t.reward / max(info.get("cost", 100) * 4, 1.0)), next(seq), 2, t))
+            if refused:
+                pool()
+                self.rewrite_answers()
         executor.shutdown(wait=False)
         self.say_done()
         trace({"ev": "end", "spent": round(self.llm.spent, 1), "calls": self.llm.calls,
@@ -645,8 +677,16 @@ def main(argv=None):
     CURRENT_RUN.append(run)
 
     def watchdog():  # never overrun the hour, whatever a worker is blocked on
+        last_wait_note = time.time()
         while True:
             time.sleep(5)
+            if run.llm.calls == 0 and getattr(run.llm, "_warned_proxy", False) and time.time() - last_wait_note >= 60:
+                # alive and waiting: no model call has succeeded yet (the policy is to wait, not to quit)
+                from urllib.parse import urlparse
+                last_wait_note = time.time()
+                print("waiting for the model proxy at %s; %d answers already written"
+                      % (urlparse(run.llm.base_url).netloc or "LLM_BASE_URL", len(run.answers)),
+                      file=sys.stderr, flush=True)
             if time.time() - T0 > run.time_limit + 60:
                 trace({"ev": "end", "watchdog": True})
                 try:

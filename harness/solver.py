@@ -346,6 +346,8 @@ class Solver:
             info["problems"] = []
             info["warning"] = "inspect error: %s" % type(e).__name__
         info["ctx_chars"] = len(info.get("ctx") or "") + len(task.short_instruction())
+        if info.get("kind") == "search":
+            info["kb_bytes"] = ctx.kb_bytes(task)
         return info
 
     # ------------------------------------------------------------------ coding

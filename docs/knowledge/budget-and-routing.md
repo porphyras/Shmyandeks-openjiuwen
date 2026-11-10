@@ -65,6 +65,11 @@ changing admission: an entry that does not fit beside active reservations is
 deferred, then requeued once the workers have joined and reservations are
 released; one that does not fit the remaining budget alone is dropped. A comment claiming budget safety is not evidence of a hard cap.[^run]
 
+A search over a knowledge base of 20 KB or more has its forecast and p90 scaled
+by KB_LARGE_FACTOR (kb_bytes from the inspection), since the capped excerpt hides
+the base's size. Phase 2 rechecks model refusals on the reasoning rung when the
+queue is done and over 20 % of a known budget is left, capped at PHASE2_SHARE.[^run]
+
 fit_cost fits from recorded run estimates. Its in-sample error and a hold-out
 calibration result answer different questions; preserve that distinction.[^fit]
 See [verification evidence](testing-and-evidence.md) for reproducible comparisons.
