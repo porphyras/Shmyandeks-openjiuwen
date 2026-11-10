@@ -136,6 +136,24 @@ class ContradictionTests(unittest.TestCase):
         self.assertEqual(self.problems("    def test_a(self):\n        self.assertTrue(m.count(4))\n"
                                        "    def test_b(self):\n        self.assertEqual(m.count(4), 1)\n"), [])
 
+    def test_module_state_between_assertions(self):
+        # a registry the test fills between two assertions: no verdict
+        lib = "_REG = []\n\ndef register(x):\n    _REG.append(x)\n\ndef names(p):\n    return [n for n in _REG if n.startswith(p)]\n"
+        test = (self.HEAD + "    def test_a(self):\n        m.register('ab')\n        self.assertEqual(m.names('a'), ['ab'])\n"
+                "        m.register('ac')\n        self.assertEqual(m.names('a'), ['ab', 'ac'])\n")
+        self.assertEqual(ctx.test_contradictions(test, ctx.impure_functions([lib])), [])
+
+    def test_patched_module_gives_no_verdict(self):
+        body = ("    def test_a(self):\n        self.assertEqual(m.top('abcdef'), 'abc')\n"
+                "        with mock.patch.object(m, 'LIMIT', 2):\n            self.assertEqual(m.top('abcdef'), 'ab')\n")
+        self.assertEqual(self.problems(body), [])
+        self.assertEqual(self.problems("    def test_a(self):\n        self.assertEqual(m.top('abc'), 'abc')\n"
+                                       "        m.LIMIT = 2\n        self.assertEqual(m.top('abc'), 'ab')\n"), [])
+
+    def test_variable_handed_to_another_call(self):
+        self.assertEqual(self.problems("    def test_a(self):\n        r = m.make(3)\n        self.assertEqual(len(r), 3)\n"
+                                       "        self.assertEqual(m.pop_last(r), 2)\n        self.assertEqual(len(r), 2)\n"), [])
+
     def test_return_and_raise(self):
         self.assertTrue(self.problems("    def test_a(self):\n        self.assertEqual(m.total([]), 0)\n"
                                       "    def test_b(self):\n        self.assertRaises(ValueError, m.total, [])\n"))

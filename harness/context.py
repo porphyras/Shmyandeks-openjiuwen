@@ -1,5 +1,6 @@
 """Task loading and cheap, LLM-free inspection: compact context and feasibility signals."""
 import ast
+import collections
 import csv
 import hashlib
 import io
@@ -877,6 +878,25 @@ _MUTATORS = {"append", "extend", "insert", "pop", "remove", "clear", "update", "
              "setdefault", "popitem", "sort", "reverse", "write", "seek", "send", "__setitem__"}
 
 
+def _scalar_literal(node):
+    """A constant that is a scalar or a tuple of scalars (LIMIT = 3, SEP = '-', AXES = ('x', 'y'))."""
+    try:
+        v = ast.literal_eval(node)
+    except Exception:
+        return False
+    flat = v if isinstance(v, tuple) else (v,)
+    return all(isinstance(x, (int, float, str, bytes, bool, type(None))) for x in flat)
+
+
+_CLOCK_CALLS = {"now", "today", "utcnow", "monotonic", "perf_counter", "time_ns", "process_time",
+                "monotonic_ns", "perf_counter_ns", "urandom", "getenv", "getrandbits"}
+
+
+# Value constructors imported by name (from datetime import date, timedelta; Decimal; Fraction).
+# A module function of the same name is a definition and is resolved as usual.
+_VALUE_TYPES = {"date", "datetime", "timedelta", "Decimal", "Fraction"}
+
+
 _PURE_BUILTINS = {"len", "abs", "min", "max", "sum", "sorted", "round", "str", "int", "float", "bool",
                   "isinstance", "range", "list", "tuple", "dict", "set", "frozenset", "enumerate", "zip",
                   "any", "all", "reversed", "divmod", "pow", "repr", "ord", "chr", "map", "filter", "hash",
@@ -897,15 +917,27 @@ def impure_functions(sources):
         except SyntaxError:
             continue
         module_names = set()
+        bindings = collections.Counter()
+        scalar = set()
         for n in tree.body:
             if isinstance(n, ast.Assign):
-                module_names |= {t.id for t in n.targets if isinstance(t, ast.Name)}
+                names = {t.id for t in n.targets if isinstance(t, ast.Name)}
+                module_names |= names
+                for nm in names:
+                    bindings[nm] += 1
+                    if _scalar_literal(n.value):
+                        scalar.add(nm)
             elif isinstance(n, (ast.AnnAssign, ast.AugAssign)) and isinstance(n.target, ast.Name):
                 module_names.add(n.target.id)
+                bindings[n.target.id] += 2  # an annotated or augmented binding is not a plain constant
+        # Module data a function may READ and another call (or the test) may change: anything but
+        # a scalar constant bound once (registries, caches, dicts of state, instances).
+        state_names = {nm for nm in module_names if not (nm in scalar and bindings[nm] == 1)}
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             local = {a.arg for a in fn.args.args + fn.args.kwonlyargs}
+            fn_stores = {x.id for x in ast.walk(fn) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store)}
             is_method = bool(fn.args.args) and fn.args.args[0].arg == "self"
             stateful = set(module_names) | ({"self"} if is_method else set())
             bad = False
@@ -917,6 +949,9 @@ def impure_functions(sources):
                 return x.id if isinstance(x, ast.Name) else None
 
             for x in ast.walk(fn):
+                if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load) and x.id in state_names \
+                        and x.id not in local and x.id not in fn_stores:
+                    bad = True  # reads module state another call may change between two assertions
                 if isinstance(x, (ast.Global, ast.Nonlocal, ast.Yield, ast.YieldFrom)):
                     bad = True
                 elif isinstance(x, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
@@ -933,8 +968,12 @@ def impure_functions(sources):
                             called.add(f.attr)  # self.other_method(...)
                         if f.attr in _MUTATORS and base in stateful and (base not in local or base == "self"):
                             bad = True
-                        if base in ("random", "time", "datetime", "uuid", "itertools", "secrets", "os",
+                        if base in ("random", "time", "uuid", "itertools", "secrets", "os",
                                     "heapq", "bisect", "sys", "io"):
+                            bad = True
+                        # datetime builds values (date(...), timedelta(...), strptime): only the
+                        # clock is state, under any import spelling (date.today(), datetime.now())
+                        if f.attr in _CLOCK_CALLS:
                             bad = True
                     elif isinstance(f, ast.Name):
                         if f.id in ("setattr", "delattr", "next", "iter", "input", "open", "exec", "eval", "print"):
@@ -956,7 +995,7 @@ def impure_functions(sources):
     while changed:  # anything calling an impure (or unknown non-builtin) function is impure
         changed = False
         for n, cs in calls.items():
-            if n not in out and any(c in out or c not in defs for c in cs):
+            if n not in out and any(c in out or (c not in defs and c not in _VALUE_TYPES) for c in cs):
                 out.add(n)
                 changed = True
     return out
@@ -1007,8 +1046,17 @@ def _substitute_pure_vars(tree, mods, funcs, impure):
                     if v in names:
                         live.pop(v)
                 continue
-            # r.method(...) or r.attr inside the assertion may change or depend on r's identity
+            # r.method(...) or r.attr inside the assertion may change or depend on r's identity, and
+            # r handed to any call but a builtin wrapper or the assertion itself may be changed there
             touched = {x.value.id for x in ast.walk(st) if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name)}
+            for c in ast.walk(st):
+                if isinstance(c, ast.Call):
+                    f = c.func
+                    allowed = (isinstance(f, ast.Name) and f.id in _WRAPPERS) or (
+                        isinstance(f, ast.Attribute) and f.attr.startswith("assert"))
+                    if not allowed:
+                        touched |= {a.id for a in list(c.args) + [k.value for k in c.keywords]
+                                    if isinstance(a, ast.Name)}
             for v in list(live):
                 if v in touched:
                     live.pop(v)
@@ -1021,6 +1069,23 @@ def _substitute_pure_vars(tree, mods, funcs, impure):
             Sub().visit(st)
 
 
+def _patches_module(tree, mods):
+    """The test replaces something at run time: a patch/setattr/monkeypatch call or decorator,
+    or an assignment into the module under test (m.LIMIT = 2). Importing mock alone is not."""
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call):
+            name = ast.unparse(n.func)
+            last = name.rsplit(".", 1)[-1]
+            if last in ("patch", "object", "dict", "multiple", "setattr", "setitem", "delattr", "setenv") and (
+                    "patch" in name or last in ("setattr", "setitem", "delattr", "setenv")):
+                return True
+        if isinstance(n, (ast.Assign, ast.AugAssign)):
+            for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id in mods:
+                    return True
+    return False
+
+
 def test_contradictions(src, impure=frozenset()):
     """Find assertions that no implementation can satisfy together: the same call required to
     equal two different literals, or a property of a call contradicting its required value."""
@@ -1029,6 +1094,10 @@ def test_contradictions(src, impure=frozenset()):
     except SyntaxError:
         return []
     mods, funcs = _target_names(tree)
+    # A test that patches or assigns into the module (mock.patch, monkeypatch, setattr, m.X = ...)
+    # can change what any of its calls returns between two assertions: no verdict from it.
+    if _patches_module(tree, mods):
+        return []
     _substitute_pure_vars(tree, mods, funcs, impure)
     asserts = []
     for n in ast.walk(tree):

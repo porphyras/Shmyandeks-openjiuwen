@@ -27,7 +27,7 @@
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "bc6a66f4ac044c2e9438ae82acb4bff4f20832c851c4e3129faa40a3d3758584"
+      "sha256": "d121919f6f6429740c659a73bc51eff0d22f9fa9da67eff6a614979ea03c0bd2"
     },
     {
       "id": "fast",
@@ -68,7 +68,10 @@ It discovers unittest classes without a main entry point and plain test function
 an empty suite cannot establish success. Test contradictions do not infer
 permutation invariance from function names alone. They also catch a pure call
 required to be both true and false, a builtin over one (len(f(x)) as 3 and 4) and a
-result kept in a variable that nothing else touches before the assertions.[^solver][^context]
+result kept in a variable that nothing else touches before the assertions. A function
+reading module data other than a scalar constant is never pure (a registry filled between
+two assertions), and a test that patches the module (mock.patch, setattr, m.X = ...) gives
+no verdict.[^solver][^context]
 
 fastpath answers only recognized task forms. A new form must have tests against
 nearby unsupported or ambiguous wording. crossfix reuses definitions that passed
