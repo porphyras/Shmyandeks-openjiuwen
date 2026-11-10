@@ -150,10 +150,16 @@ class DecimalsOfTheAnswerTests(unittest.TestCase):
                            ("The answer should be rounded to 2 decimal places. What is the mean?", "42.00"),
                            ("What is the mean? The result must be given with 2 decimal places.", "42.00"),
                            ("What is the mean? Use 2 decimal places.", "42.00"),
-                           ("What share is it? Give your answer as a percentage with one decimal.", "42.0")):
+                           ("What share is it? Give your answer as a percentage with one decimal.", "42.0"),
+                           ("What percentage was sold? Give the answer as a percentage rounded to 1 decimal place, "
+                            "without the % sign.", "42.0"),
+                           ("What is the sum of quantity * unit_price? Give the amount in dollars with 2 decimal "
+                            "places.", "42.00")):
             self.assertEqual(solver.format_for_instruction("42", text), want, text)
         self.assertEqual(solver.format_for_instruction("-0.004", "What is it? Round the result to 2 decimal places."),
                          "0.00")
+        self.assertEqual(solver.format_for_instruction(
+            "8%", "What percentage was sold? Give it as a percentage rounded to 1 decimal place, with the % sign."), "8.0%")
 
 
 if __name__ == "__main__":

@@ -196,16 +196,19 @@ _DEC_IMPERATIVE = re.compile(  # a sentence that tells how to write the answer
     r"(?:\s+(?:the|your|final|result|answer|it|value|as|a|decimal|number|rounded|half|up|percentage|percent))*"
     r"\s+(?:(?:to|with|using|in)\s+)?(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
 _DEC_FOR_ANSWER = re.compile(  # "Keep 2 decimal places in the answer."
-    r"(?i)\b%s\s+decimals?(?:\s+places?)?\s+(?:in|for|of)\s+(?:the\s+|your\s+)?(?:final\s+)?(?:answer|result)\b"
-    % _NUM_WORD)
+    r"(?i)\b%s\s+decimals?(?:\s+places?)?\s+(?:in|for|of)\s+(?:the\s+|your\s+)?(?:final\s+)?(?:answer|result)"
+    r"\s*[.?!)]*\s*$" % _NUM_WORD)  # ends the sentence: "... in the result table" is about the data
 _DEC_ROUND_IT = re.compile(  # "... and round it / the result to 2 decimals"
-    r"(?i)\bround\s+(?:it|the\s+result|the\s+answer|your\s+answer|the\s+final\s+answer|the\s+value)\s+"
+    r"(?i)\bround\s+(?:it|the\s+result|the\s+answer|your\s+answer|the\s+final\s+answer)\s+"
     r"to\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
 
 
 _DEC_SUBJECT = re.compile(  # "The answer should be rounded to 2 decimal places", "Your answer should have 2 ..."
     r"(?i)\b(?:the|your)\s+(?:final\s+)?(?:answer|result)\s+(?:should|must|is\s+to|needs\s+to|has\s+to|will)\b"
     r"[^.?!]*?\b%s\s+decimal" % _NUM_WORD)
+_DEC_GIVE = re.compile(  # a sentence that tells how to give the answer: any words, any tail
+    r"(?i)^(?:please\s+)?(?:give|report|express|write|present|provide|return|state|answer)\b[^.?!]*?\b%s\s+decimal"
+    % _NUM_WORD)
 _DEC_USE = re.compile(r"(?i)^(?:please\s+)?(?:use|keep)\s+(?:exactly\s+)?%s\s+decimals?(?:\s+places?)?\s*[.!]?$" % _NUM_WORD)
 _DEC_ROUNDED = re.compile(r"(?i)\bround(?:ed)?\s+to\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
 _DEC_Q_ANY = re.compile(r"(?i)\b(?:to|with|in)\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
@@ -241,10 +244,14 @@ def _asked_decimals(instruction):
     count = re.compile(r"(?i)\b%s\s+decimal" % _NUM_WORD)
     found = set()
     for i, x in enumerate(sents):
-        if not _DEC_AT_END.search(x):
-            continue
-        about_answer = (_DEC_SUBJECT.search(x) or _DEC_IMPERATIVE.match(x) or _DEC_ROUND_IT.search(x)
-                        or _DEC_FOR_ANSWER.search(x) or _DEC_USE.match(x))
+        # About the answer by its very form, whatever follows ("Give the answer as a percentage
+        # rounded to 1 decimal place, without the % sign.", "Give the amount in dollars with 2
+        # decimal places.").
+        about_answer = (_DEC_GIVE.match(x) or _DEC_SUBJECT.search(x) or _DEC_ROUND_IT.search(x)
+                        or _DEC_FOR_ANSWER.search(x))
+        if not about_answer and not _DEC_AT_END.search(x):
+            continue  # otherwise the count must end its sentence ("... before comparing" is data)
+        about_answer = about_answer or _DEC_IMPERATIVE.match(x) or _DEC_USE.match(x)
         if not about_answer and not (_DATA_VERBS_Q if i == q else _DATA_VERBS).search(x):
             counting = i == q and re.match(r"(?i)how\s+many\b", x)  # "How many ... with 2 decimal places?"
             about_answer = (_DEC_ROUNDED.search(x) or _DEC_IN_QUESTION.search(x) if i == q else _DEC_ROUNDED.search(x)) \
@@ -262,8 +269,15 @@ def format_for_instruction(ans, instruction):
     zeros; more are rounded the way a Python task generator does (f"{x:.2f}": 2.675 -> 2.67,
     0.125 -> 0.12), or half up when the task says so. Anything else unchanged."""
     n = _asked_decimals(instruction)
-    if not n or not re.fullmatch(r"-?\d+(\.\d+)?", ans or ""):
+    pct = (ans or "").endswith("%")  # "8%" asked "as a percentage ... with the % sign" -> "8.0%"
+    num = ans[:-1].strip() if pct else ans
+    if not n or not re.fullmatch(r"-?\d+(\.\d+)?", num or ""):
         return ans
+    out = _with_decimals(num, n, instruction)
+    return out + "%" if pct else out
+
+
+def _with_decimals(ans, n, instruction):
     whole, _, frac = ans.partition(".")
     if len(frac) <= n:
         out = "%s.%s" % (whole, frac.ljust(n, "0"))
