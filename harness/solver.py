@@ -185,29 +185,63 @@ def normalize_answer(s):
     return s
 
 
-_DECIMALS = re.compile(r"(?i)\b(?:round(?:ed|ing)?|to|with|using|keep|in)\b[^.\n]{0,40}?\b(\d|one|two|three|four)\s+decimals?"
-                       r"(?:\s+places?|\s+digits?)?\b")
+_NUM_WORD = r"(\d|one|two|three|four)"
 _WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4}
+# Phrases that ask for the ANSWER's decimals - never a description of the data ("Prices are
+# stored with 2 decimal places", "Compare the prices using 2 decimal places").
+_DEC_IN_QUESTION = re.compile(  # inside the question sentence itself
+    r"(?i)\bround(?:ed)?\s+to\s+(?:exactly\s+)?%s\s+decimal|\(\s*%s\s+decimals?(?:\s+places?)?\s*\)" % (_NUM_WORD, _NUM_WORD))
+_DEC_IMPERATIVE = re.compile(  # a sentence that tells how to write the answer
+    r"(?i)^(?:please\s+)?(?:round|give|report|express|write|present|provide|return|state|answer)\b"
+    r"(?:\s+(?:the|your|final|result|answer|it|value|as|a|decimal|number|rounded|half|up))*"
+    r"\s+(?:(?:to|with|using|in)\s+)?(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
+_DEC_FOR_ANSWER = re.compile(  # "Keep 2 decimal places in the answer."
+    r"(?i)\b%s\s+decimals?(?:\s+places?)?\s+(?:in|for|of)\s+(?:the\s+|your\s+)?(?:final\s+)?(?:answer|result)\b"
+    % _NUM_WORD)
+_DEC_ROUND_IT = re.compile(  # "... and round it / the result to 2 decimals"
+    r"(?i)\bround\s+(?:it|the\s+result|the\s+answer|your\s+answer|the\s+final\s+answer|the\s+value)\s+"
+    r"to\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
+
+
+def _asked_decimals(instruction):
+    """Decimals the task asks the answer to have: from the question sentence (", rounded to two
+    decimals?", "(two decimals)?") or a sentence about the answer ("Round the result to 2
+    decimal places.", "Give the answer with exactly two decimals.", "... and round it to 2
+    decimals"); None when not asked, asked ambiguously, or the question wants a whole number."""
+    sents = [x.strip() for x in re.split(r"(?<=[.?!])\s+(?=[A-Z(])", instruction or "") if x.strip()]
+    qs = [i for i, x in enumerate(sents) if x.endswith("?")]
+    q = qs[-1] if qs else -1
+    found = set()
+    if q >= 0:
+        if re.search(r"(?i)\bnearest\s+(?:integer|whole\s+number)|\bwhole\s+number\b", sents[q]):
+            return None
+        for m in _DEC_IN_QUESTION.finditer(sents[q]):
+            found.add(next(g for g in m.groups() if g))
+    for x in sents:
+        if _DEC_IMPERATIVE.match(x) or _DEC_ROUND_IT.search(x) or _DEC_FOR_ANSWER.search(x):
+            # every count the sentence names ("to 2 decimal places, or to 3") - two make it ambiguous
+            found.update(re.findall(r"(?i)\b%s\s+decimal" % _NUM_WORD, x))
+    asked = {_WORD_NUM.get(x.lower()) or int(x) for x in found}
+    return asked.pop() if len(asked) == 1 else None
 
 
 def format_for_instruction(ans, instruction):
-    """A number written with exactly the decimals the task asks for ("Round the result to 2
-    decimal places": 51.4 -> 51.40, 15 -> 15.00). Fewer digits are only padded with zeros; more
-    are rounded the way a Python task generator does (f"{x:.2f}": 2.675 -> 2.67, 0.125 -> 0.12),
-    or half up when the task says so. Anything else unchanged."""
-    asked = {_WORD_NUM.get(x.lower()) or int(x) for x in _DECIMALS.findall(instruction or "")}
-    if len(asked) != 1 or not re.fullmatch(r"-?\d+(\.\d+)?", ans or ""):
-        return ans
-    n = asked.pop()
-    if n <= 0:
+    """A number written with exactly the decimals the task asks for its answer ("Round the
+    result to 2 decimal places": 51.4 -> 51.40, 15 -> 15.00). Fewer digits are only padded with
+    zeros; more are rounded the way a Python task generator does (f"{x:.2f}": 2.675 -> 2.67,
+    0.125 -> 0.12), or half up when the task says so. Anything else unchanged."""
+    n = _asked_decimals(instruction)
+    if not n or not re.fullmatch(r"-?\d+(\.\d+)?", ans or ""):
         return ans
     whole, _, frac = ans.partition(".")
     if len(frac) <= n:
-        return "%s.%s" % (whole, frac.ljust(n, "0"))
-    if re.search(r"(?i)\bhalf[\s-]+up\b", instruction):  # the task names its rounding rule
+        out = "%s.%s" % (whole, frac.ljust(n, "0"))
+    elif re.search(r"(?i)\bhalf[\s-]+up\b", instruction):  # the task names its rounding rule
         from decimal import Decimal, ROUND_HALF_UP
-        return str(Decimal(ans).quantize(Decimal(1).scaleb(-n), rounding=ROUND_HALF_UP))
-    return "%.*f" % (n, float(ans))
+        out = str(Decimal(ans).quantize(Decimal(1).scaleb(-n), rounding=ROUND_HALF_UP))
+    else:
+        out = "%.*f" % (n, float(ans))
+    return out[1:] if re.fullmatch(r"-0\.0+", out) else out  # no "-0.00"
 
 
 # "Which product/region/... ?" asks for a label: a bare number printed for it is a wrong column.

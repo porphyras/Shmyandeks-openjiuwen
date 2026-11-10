@@ -119,5 +119,31 @@ class AnswerFormatTests(unittest.TestCase):
         self.assertIsNone(solver._ASKS_LABEL.search("Which year had the most sales?"))
 
 
+class DecimalsOfTheAnswerTests(unittest.TestCase):
+    """Only a phrase about the answer sets its decimals; a description of the data never does."""
+
+    def test_descriptions_of_the_data(self):
+        for text in ("The file s.csv has columns a,b (3 rows). Prices are stored with 2 decimal places. How many units?",
+                     "The price column is given to 2 decimals. How many units were sold?",
+                     "All amounts in the file are rounded to 2 decimal places. How many units were sold?",
+                     "What is the total number of units, rounded to the nearest integer? Prices have 2 decimal places.",
+                     "How many orders have a price above 5.30? Compare the prices using 2 decimal places.",
+                     "Each box weighs 2.50 kg, a weight written with two decimals. How many boxes are left?",
+                     "Round all prices to 2 decimals before summing. How many units were sold?"):
+            self.assertEqual(solver.format_for_instruction("42", text), "42", text)
+
+    def test_phrases_about_the_answer(self):
+        for text, want in (("How many dollars does it earn in total (two decimals)?", "42.00"),
+                           ("What is the mean price? Round half up to 2 decimal places.", "42.00"),
+                           ("What is the mean price? Keep 2 decimal places in the answer.", "42.00"),
+                           ("What is it? Give the answer with exactly two decimals (round half up).", "42.00"),
+                           ("What fraction is left? Give it as a decimal rounded to two decimals.", "42.00"),
+                           ("Compute the average price and round it to 3 decimals.", "42.000"),
+                           ("What is the mean? Round the result to 0 decimal places.", "42")):
+            self.assertEqual(solver.format_for_instruction("42", text), want, text)
+        self.assertEqual(solver.format_for_instruction("-0.004", "What is it? Round the result to 2 decimal places."),
+                         "0.00")
+
+
 if __name__ == "__main__":
     unittest.main()

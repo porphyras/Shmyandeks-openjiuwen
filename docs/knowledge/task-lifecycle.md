@@ -57,8 +57,10 @@ finish); the workflow state carries only the task name, its rung and the flags
 go/stop/defer, while tasks, inspections and outcomes stay in Run's registries.
 The SDK's 60-second workflow timeout is disabled; the harness keeps its own.[^flow]
 
-A math or data answer is written with exactly the decimals the task asks for
-(padding only, or Python-style rounding of extra digits; half up when stated).
+A math or data answer is written with exactly the decimals the task asks for its
+answer (padding only, or Python-style rounding of extra digits; half up when
+stated); a sentence describing the data ("prices are stored with 2 decimal
+places") does not count, and a question asking for a whole number keeps it.
 The output contract is answer.txt in the task directory and, when present, its
 workspace. Coding tasks also leave modified source files. Summary optionally
 writes solutions.json and token_estimates.json. Per-task answers are persisted
