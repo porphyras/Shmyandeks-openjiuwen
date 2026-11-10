@@ -134,7 +134,10 @@ class DecimalsOfTheAnswerTests(unittest.TestCase):
                      "How many orders have a price, rounded to 2 decimal places, above 5.30?",
                      "What is the number of products whose average price rounded to 2 decimals equals 5.25?",
                      "Round the value to 2 decimal places before comparing. How many orders exceed 5.30?",
-                     "The prices have 2 decimal places in the result table. How many rows does it have?"):
+                     "The prices have 2 decimal places in the result table. How many rows does it have?",
+                     "Give the number of orders whose price, written with 2 decimal places, exceeds 5.30.",
+                     "Report the count of products priced to 2 decimal places.",
+                     "State how many prices in the file have more than 2 decimal places."):
             self.assertEqual(solver.format_for_instruction("42", text), "42", text)
 
     def test_phrases_about_the_answer(self):
@@ -160,6 +163,9 @@ class DecimalsOfTheAnswerTests(unittest.TestCase):
                          "0.00")
         self.assertEqual(solver.format_for_instruction(
             "8%", "What percentage was sold? Give it as a percentage rounded to 1 decimal place, with the % sign."), "8.0%")
+        self.assertEqual(solver.format_for_instruction(
+            "8%", "What percentage was sold? Give the answer as a percentage rounded to 1 decimal place, without the % "
+                  "sign."), "8.0")
 
 
 if __name__ == "__main__":

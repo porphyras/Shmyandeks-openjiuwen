@@ -207,8 +207,9 @@ _DEC_SUBJECT = re.compile(  # "The answer should be rounded to 2 decimal places"
     r"(?i)\b(?:the|your)\s+(?:final\s+)?(?:answer|result)\s+(?:should|must|is\s+to|needs\s+to|has\s+to|will)\b"
     r"[^.?!]*?\b%s\s+decimal" % _NUM_WORD)
 _DEC_GIVE = re.compile(  # a sentence that tells how to give the answer: any words, any tail
-    r"(?i)^(?:please\s+)?(?:give|report|express|write|present|provide|return|state|answer)\b[^.?!]*?\b%s\s+decimal"
-    % _NUM_WORD)
+    r"(?i)^(?:please\s+)?(?:give|report|express|write|present|provide|return|state|answer)\b"
+    r"(?!\s+(?:me\s+)?(?:the\s+|a\s+)?(?:total\s+)?(?:number|count)\s+of\b)(?!\s+how\s+many\b)"  # a count is a whole number
+    r"[^.?!]*?\b%s\s+decimal" % _NUM_WORD)
 _DEC_USE = re.compile(r"(?i)^(?:please\s+)?(?:use|keep)\s+(?:exactly\s+)?%s\s+decimals?(?:\s+places?)?\s*[.!]?$" % _NUM_WORD)
 _DEC_ROUNDED = re.compile(r"(?i)\bround(?:ed)?\s+to\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
 _DEC_Q_ANY = re.compile(r"(?i)\b(?:to|with|in)\s+(?:exactly\s+)?%s\s+decimal" % _NUM_WORD)
@@ -274,6 +275,8 @@ def format_for_instruction(ans, instruction):
     if not n or not re.fullmatch(r"-?\d+(\.\d+)?", num or ""):
         return ans
     out = _with_decimals(num, n, instruction)
+    if pct and re.search(r"(?i)\b(?:without|no)\s+(?:the\s+|a\s+)?(?:%|percent(?:age)?)\s+(?:sign|symbol)", instruction):
+        return out  # "... rounded to 1 decimal place, without the % sign": 8% -> 8.0
     return out + "%" if pct else out
 
 
