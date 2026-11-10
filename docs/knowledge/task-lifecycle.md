@@ -29,6 +29,11 @@
       "sha256": "8881824659d6dcc3f55bbe529de3bb299caba230317cd96b53e61db5a875645a"
     },
     {
+      "id": "flow",
+      "resource": "../../harness/oj_flow.py",
+      "sha256": "9357f81d4dad4356158006cef78853d08c8ea83f439902bac9de0d153a5e6182"
+    },
+    {
       "id": "io",
       "resource": "../../harness/io_utils.py",
       "sha256": "7d0cffeec49b9fdc288282057ff13a16d0a5ed14c6f857097a5184fe637a0258"
