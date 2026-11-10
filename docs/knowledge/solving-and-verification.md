@@ -27,7 +27,7 @@
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "0e79980edb1749a38972985a02f3fd7ae487b4ccfe01f9db90f9ffff62176e10"
+      "sha256": "8881824659d6dcc3f55bbe529de3bb299caba230317cd96b53e61db5a875645a"
     },
     {
       "id": "fast",
@@ -84,7 +84,9 @@ Tests that pass before any change give a free DONE, except when the instruction
 asks for new code (add or implement a function, method or class; hidden tests).
 A math program's int(), math.floor() and math.ceil() take a float within
 rounding noise of an integer as that integer (72 / 0.72 prints 100, not 99).
-Tables skip comment and blank lines before the header.[^solver][^context]
+Tables skip comment and blank lines before the header. A column announced in
+"The file X has columns ..." but absent from the file makes the task infeasible
+only when the question itself uses it; otherwise it is a hint for the model.[^solver][^context]
 
 Card questions can combine forward Mentor links with a unique inverse link
 ("the person mentored by ..."). Inverse chains require a complete, bounded

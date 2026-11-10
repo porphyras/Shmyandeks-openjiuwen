@@ -77,5 +77,21 @@ class NewCodeInstructionTests(unittest.TestCase):
             self.assertIsNone(solver._NEW_CODE.search(text))
 
 
+class AnnouncedColumnTests(unittest.TestCase):
+    def problems(self, question):
+        d = tempfile.mkdtemp(prefix="gp_")
+        os.makedirs(os.path.join(d, "workspace"))
+        with open(os.path.join(d, "workspace", "sales.csv"), "w") as f:
+            f.write("order_id,region,units\n1,west,5\n2,east,7\n")
+        instr = "The file sales.csv has columns order_id,region,units,discount (2 rows). " + question
+        return ctx.data_context(ctx.Task(d, {"task_id": "t", "instruction": instr, "reward": 1}))[1]
+
+    def test_missing_column_the_question_uses(self):
+        self.assertTrue(any("discount" in p for p in self.problems("What is the average discount in region 'west'?")))
+
+    def test_missing_column_the_question_does_not_use(self):
+        self.assertFalse(any("missing in file" in p for p in self.problems("How many units were sold in region 'west'?")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -307,8 +307,15 @@ def data_context(task):
             norm = lambda x: re.sub(r"[\s_]+", "_", x.strip().lower())
             hdr = {norm(h) for h in hdrs[0].get("header", [])}
             missing = [c for c in announced if norm(c) not in hdr]
-            if missing:
-                problems.append("columns missing in file: %s" % ",".join(missing))
+            # Only a column the question itself uses makes it unanswerable; an announced column
+            # the question never needs ("..., discount") is only a hint for the model.
+            question = instr[m.end():].lower()
+            used = [c for c in missing if re.search(r"\b%s\b" % re.escape(c.lower().replace("_", " ")),
+                                                     question.replace("_", " "))]
+            if used:
+                problems.append("columns missing in file: %s" % ",".join(used))
+            elif missing:
+                soft.append("announced columns missing in file: %s" % ",".join(missing))
     if not files:
         problems.append("no data files")
     # Every table is empty (a header only) and the question asks for a statistic that does not
