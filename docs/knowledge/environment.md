@@ -21,7 +21,7 @@
     {
       "id": "docker",
       "resource": "../../Dockerfile",
-      "sha256": "28fbd62db1d87e4a835ca87d51a8bfd837f0c14b4ccce5d9d81d51efb4e8e488"
+      "sha256": "5d62d5b5d63eeba81c6de96fb75e7020c1c322bd5c237da7e3fb3fd0b7af74bd"
     },
     {
       "id": "ignore",
@@ -41,7 +41,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "934295ab9fddc76e1f180957fdf5782e4b0f6a1659fbe2006a54107af2946b9f"
+      "sha256": "68a3b63bd0710210460a3293ba445735b79185b42b9e096b2c6d80924a4aa2f7"
     },
     {
       "id": "deps",
