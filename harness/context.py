@@ -950,7 +950,15 @@ def unproven_functions(sources):
                             r = r.value
                         if isinstance(r, ast.Name):
                             rebound.add(r.id)
-        constants = {nm for nm in scalar if bindings[nm] == 1 and nm not in rebound}
+        # A module that can rebind its own names at run time (setattr(sys.modules[__name__], ...),
+        # globals()[...], vars(), __dict__, exec/eval, importlib) has no proven constants.
+        dynamic = any(
+            (isinstance(x, ast.Call) and ast.unparse(x.func).rsplit(".", 1)[-1] in
+             ("setattr", "globals", "vars", "exec", "eval", "__import__", "reload", "import_module")) or
+            (isinstance(x, ast.Attribute) and x.attr in ("modules", "__dict__")) or
+            (isinstance(x, ast.Name) and x.id == "importlib")
+            for x in ast.walk(tree))
+        constants = set() if dynamic else {nm for nm in scalar if bindings[nm] == 1 and nm not in rebound}
         others |= {nm for nm in bindings if nm not in constants and nm not in defs}
         cand = set()
         for name, fn in defs.items():

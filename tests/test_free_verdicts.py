@@ -172,6 +172,13 @@ class ContradictionTests(unittest.TestCase):
         self.assertEqual(self.unproven("class Config:\n    limit = 3\n\ndef top(s):\n    return s[:Config.limit]\n",
                                        two.format(c="top('abcdef')")), [])
 
+    def test_a_module_that_rebinds_itself_has_no_constants(self):
+        lib = ("import sys\nLIMIT = 3\n\ndef set_limit(v):\n    setattr(sys.modules[__name__], 'LIMIT', v)\n\n"
+               "def top(s):\n    return s[:LIMIT]\n")
+        body = ("    def test_a(self):\n        m.set_limit(3)\n        self.assertEqual(m.top('abcdef'), 'abc')\n"
+                "        m.set_limit(2)\n        self.assertEqual(m.top('abcdef'), 'ab')\n")
+        self.assertEqual(self.unproven(lib, body), [])
+
     def test_writes_through_the_module_give_no_verdict(self):
         for line in ("m.Config.limit = 2", "vars(m)['LIMIT'] = 2", "m.REG['a'] = 1", "importlib.reload(m)"):
             body = ("    def test_a(self):\n        self.assertEqual(m.top('abc'), 'abc')\n        %s\n"
