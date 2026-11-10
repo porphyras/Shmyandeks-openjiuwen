@@ -21,7 +21,7 @@
     {
       "id": "agents",
       "resource": "../../AGENTS.md",
-      "sha256": "848a77cfb7de45a54764fa8a156df8cd1fb31cc0da1999b7d82ea6b7ed69ed04"
+      "sha256": "07494f7ddd08157bd22e50feb30f939c1076ce84772d8bac4a950c32815a692b"
     },
     {
       "id": "template",
