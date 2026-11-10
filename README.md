@@ -84,7 +84,8 @@ LLM_BASE_URL=... LLM_API_KEY=... python run_agent.py --tasks-dir /path/to/tasks
   (how the organisers pass it, e.g. `BUDGET=100000`) or env `TOKEN_BUDGET`, in that order, and
   100000 (the announced figure) when none is given (`HARNESS_BUDGET=0` means unlimited);
   unknown arguments are ignored. The proxy does not report the remainder: the harness counts
-  every call the organisers' way and stays within the budget.
+  every call the organisers' way and plans its work to fit the budget; the organisers stop the
+  run at the limit, and every answer is written as soon as its task is solved.
 
 ### openJiuwen components used
 

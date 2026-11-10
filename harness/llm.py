@@ -48,7 +48,9 @@ class LLM:
 
         def log_and_warn(rec):
             inner_log(rec)
-            if rec.get("ev") == "llm_error" and rec.get("kind") in ("transient", "fatal") and not self._warned_proxy:
+            if rec.get("ev") == "llm_error" and rec.get("kind") in ("transient", "fatal") and not self._warned_proxy \
+                    and not any(model_missing(Exception(rec.get("err", "")), m)
+                                for m in [rec.get("model")] + self.fallback):  # a missing model is handled
                 self._warned_proxy = True
                 import sys
                 # (the error text is in the trace, where the key is redacted; not repeated here)

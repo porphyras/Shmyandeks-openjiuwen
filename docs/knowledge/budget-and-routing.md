@@ -26,7 +26,7 @@
     {
       "id": "llm",
       "resource": "../../harness/llm.py",
-      "sha256": "cc045e324231bd6f7ec6f3ed86af2bed0aa057802250b90a20011eb496036fb7"
+      "sha256": "7d54bd2ac12976d12750e61dfaf12067fe84663c78da80426c7823c956286d7b"
     },
     {
       "id": "rails",

@@ -36,7 +36,7 @@
     {
       "id": "llm",
       "resource": "../../harness/llm.py",
-      "sha256": "cc045e324231bd6f7ec6f3ed86af2bed0aa057802250b90a20011eb496036fb7"
+      "sha256": "7d54bd2ac12976d12750e61dfaf12067fe84663c78da80426c7823c956286d7b"
     },
     {
       "id": "run",
@@ -72,7 +72,8 @@ directory the container's user cannot write (root without capabilities on a host
 folder) is reported on stderr at once, and the run ends with a one-line summary
 of answers written and units spent, also when a signal or the time limit stops
 it. The first failed proxy call prints one hint about LLM_BASE_URL/LLM_API_KEY
-(the error text stays in the trace, where the key is redacted).[^run][^llm]
+(the error text stays in the trace, where the key is redacted); a model the proxy
+does not serve is handled by the fallback and prints no hint.[^run][^llm]
 
 sandbox.py defines the interpreter, clean environment, subprocess launcher,
 timeouts, output capture and resource limits. Model programs execute in task
