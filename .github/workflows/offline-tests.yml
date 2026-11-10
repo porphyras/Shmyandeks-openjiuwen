@@ -8,17 +8,21 @@ permissions:
 jobs:
   offline-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12"]  # the image's Python; requirements.txt is locked for it
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Run offline tests (standard library only)
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install the harness dependencies (openJiuwen, pinned as in the image)
+        run: python -m pip install -r requirements.txt
+      - name: Run offline tests (no model calls, no credentials)
         run: python -m unittest discover -s tests -v
       - name: Check that stress tests detect known mistakes
         run: python bench/tools/check_test_sensitivity.py
