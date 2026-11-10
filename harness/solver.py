@@ -29,6 +29,39 @@ CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S)
 
 # Expressions often use np.floor / math.floor without importing them.
 _IMPORTS = "import math\nimport numpy as np\nimport pandas as pd\n"
+# int()/floor()/ceil() of a float that is an integer up to rounding noise (72 / 0.72 = 99.99999999999999)
+# take that integer; any other value behaves as before.
+_TOLERANT = """import math as _tm
+
+
+def _near(x):
+    return isinstance(x, float) and abs(x - round(x)) <= 1e-9 * max(1.0, abs(x))
+
+
+def _tint(x, *a):
+    return round(x) if not a and _near(x) else int(x, *a)
+
+
+def _tfloor(x):
+    return round(x) if _near(x) else _tm.floor(x)
+
+
+def _tceil(x):
+    return round(x) if _near(x) else _tm.ceil(x)
+"""
+
+
+_NEW_CODE = re.compile(r"(?i)\b(?:add|implement|write|create|define)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?"
+                       r"(?:\w+\s+)?(?:function|method|class|feature)\b|\bhidden\s+tests?\b|"
+                       r"\bnew\s+(?:function|method|class)\b")
+
+
+def _tolerant_ints(code):
+    """Route int()/math.floor()/math.ceil() calls of a math program through _TOLERANT."""
+    new = re.sub(r"(?<![\w.])int\(", "_tint(", code)
+    new = re.sub(r"\bmath\.floor\(", "_tfloor(", new)
+    new = re.sub(r"\bmath\.ceil\(", "_tceil(", new)
+    return code if new == code else _TOLERANT + new
 
 # Text columns that are numbers in disguise ("1,250", "$12.50", " 7 ") become numbers; the
 # model is told so. Only columns where nearly every non-empty value parses are touched.
@@ -350,7 +383,9 @@ class Solver:
             info["problems"] += ["test imports missing module %s" % m for m in ctx.missing_imports(tsrc, task.cwd)]
             info["problems"] += ctx.missing_fixtures(tsrc, os.path.dirname(tp))
         ok, out = self._run_tests(task, tests)
-        info["initial_pass"] = ok
+        # Passing tests prove nothing when the task asks for new code ("Add a function average(xs)
+        # ...; hidden tests will check it"): such a task goes to the model.
+        info["initial_pass"] = ok and not _NEW_CODE.search(task.instruction or "")
         info["test_out"] = out
         info["ctx"] = self._coding_context(task, srcs, tests, out)
 
@@ -485,6 +520,8 @@ class Solver:
             if prelude:
                 code = _fix_query_columns(code, data)
                 code = prelude + (code if "print(" in code else _wrap_last_expr(code) + _PRINT_SCALAR)
+            elif not data:
+                code = _tolerant_ints(code)
             ans_path = os.path.join(task.cwd, "answer.txt")
             before = _mtime(ans_path)
             rc, out, err = sandbox.run_python_code(code, task.cwd, timeout=30)

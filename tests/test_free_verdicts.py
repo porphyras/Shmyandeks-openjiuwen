@@ -150,3 +150,25 @@ class FactInAnotherFieldTests(unittest.TestCase):
     def test_bare_base_keeps_its_verdict(self):
         verdict = self.solve("Who is Dana Kim's mentor?", {"kb/dana.md": "# Dana Kim\n\nBorn: 1990\n"})
         self.assertEqual(verdict[0], "infeasible")
+
+
+class UnknownCardKeyTests(unittest.TestCase):
+    """A base with a label outside the known schema may state the asked fact under that label."""
+
+    def solve(self, question, card):
+        files = dict(CARDS)
+        files["kb/dana.md"] = card
+        return fastpath.solve(make_task(KB + question, files), "search")
+
+    def test_synonym_keys_are_not_absence(self):
+        cases = [("In which year was Dana Kim born?", "# Dana Kim\n\nDOB: 1980\n"),
+                 ("Which company does Dana Kim work for?", "# Dana Kim\n\nFirm: Cobalt Works\n"),
+                 ("Who is Dana Kim's mentor?", "# Dana Kim\n\nSupervisor: Boris Ivanov\n"),
+                 ("How many people work for Cobalt Works?", "# Dana Kim\n\nFirm: Cobalt Works\n"),
+                 ("What is Dana Kim's job title?", "# Dana Kim\n\nOccupation: engineer\n")]
+        for question, card in cases:
+            self.assertIsNone(self.solve(question, card), question)
+
+    def test_known_schema_keeps_its_verdict(self):
+        self.assertEqual(self.solve("Who is Dana Kim's mentor?", "# Dana Kim\n\nBorn: 1990\nRole: analyst\n")[0],
+                         "infeasible")

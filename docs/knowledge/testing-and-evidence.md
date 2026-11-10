@@ -21,7 +21,7 @@
     {
       "id": "sets",
       "resource": "../../bench/README_sets.md",
-      "sha256": "489df8d1ea20de1392bbe42640180d68f50a9fe318a87f5876d4d49c0bd9cf92"
+      "sha256": "b19d20a4397129e548146eb1f6c1a3428a39fba4e23a121098eea8cded67b291"
     },
     {
       "id": "local",
@@ -41,7 +41,7 @@
     {
       "id": "tests",
       "resource": "../../tests/test_free_verdicts.py",
-      "sha256": "da937c84d6150cef1e4527157940f09b6e09f40d6d409a3b1eb3da1c346f50ca"
+      "sha256": "373a7167495997fe843cc8bbbbe479c46aaf1d98c6d6390e03d1dc9e01771e03"
     }
   ]
 }

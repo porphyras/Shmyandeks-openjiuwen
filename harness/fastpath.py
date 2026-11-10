@@ -566,6 +566,8 @@ def _off_schema(task, sent):
         cards = _cards(task)
         if not cards or m.group(1).lower() not in cards:
             return None  # not a parsed card base, or no card for the entity: the model looks
+        if any(set(c) - _SCHEMA for c in cards.values()):
+            return None  # "Occupation", "Creator", "Educated at": a label we do not know may carry it
         # Every value must be bare (a year, a plain name, a one-word role): "Born: 1980 in Lima",
         # "Founded: 1999 by Ann Lee", "Employer: X (since 2015)" may carry the asked fact.
         bare = re.compile(r"\d{4}|[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*|[a-z]+")
@@ -596,7 +598,16 @@ def _maybe_same(a, b):
     """Two names that may denote one entity: the words of one all occur in the other
     (another order, a middle name, a suffix; accents ignored)."""
     wa, wb = _words(a), _words(b)
-    return bool(wa) and bool(wb) and (wa <= wb or wb <= wa)
+    if not wa or not wb:
+        return False
+    if wa <= wb or wb <= wa:
+        return True
+    # "A. Wang" / "Alice Wang": the full words agree and each initial starts a word of the other
+    for x, y in ((wa, wb), (wb, wa)):
+        inits = {w for w in x if len(w) == 1}
+        if inits and x - inits <= y and all(any(v.startswith(i) for v in y - (x - inits)) for i in inits):
+            return True
+    return False
 
 
 def _absent(name, cards, texts, mentioned_ok=False):
@@ -635,6 +646,10 @@ def _no_such_field(card, field):
 _BARE = re.compile(r"\d{4}|[A-Z][\w'\-]*(?: [A-Z&][\w'\-]*)*|[a-z]+")
 
 
+# The card fields whose absence can be told: a base with any other key ("DOB", "Firm", "Started",
+# "Supervisor", "Main site") may state the asked fact under a label we do not know.
+_SCHEMA = {"Born", "Employer", "Mentor", "Headquarters", "Founded", "Role", "Hometown", "Industry"}
+
 _LINK_WORDS = {"by", "at", "in", "is", "was", "from", "since", "to", "with", "for", "of", "under"}
 
 
@@ -644,6 +659,8 @@ def _bare_base(cards, kin=()):
     Carla Diaz", "Details: born in 1990 in Lima", "Role: engineer at Delta Foods" state facts
     outside their field, so absence or a count over the fields proves nothing."""
     for c in cards.values():
+        if set(c) - _SCHEMA:
+            return False
         for v in c.values():
             if v == _CONFLICT:
                 return False  # the two values that differ are no longer seen: either may be a sentence

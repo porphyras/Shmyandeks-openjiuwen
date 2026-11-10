@@ -22,17 +22,17 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "c9ff5b67a21b5ccf8c234a1c4110689b859058a24b5271fe4fc0764adc9bba31"
+      "sha256": "bcacc0485e40b23f66e61d5a5617b1eaf1bd43bae6ab97203a0bf94fae68c109"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "d29c7e590281b3753bef295cae5e6aaca9974ee2c2d8703518e1b524d86ef62d"
+      "sha256": "0e79980edb1749a38972985a02f3fd7ae487b4ccfe01f9db90f9ffff62176e10"
     },
     {
       "id": "fast",
       "resource": "../../harness/fastpath.py",
-      "sha256": "c87c01e950ea13df16a21c1fdb4404f4588a7c068ca3ede2d45eae8400fb2e9e"
+      "sha256": "b7893b8e5fd64e61805431b02df2cf0d596ce050afe75cc0d21dfb167c7c4b20"
     },
     {
       "id": "crossfix",
@@ -75,7 +75,16 @@ it is different from guessing a mutation until visible tests pass.[^fast][^cross
 Over a card base, a free "infeasible" or a head count needs every card value to
 be bare (a year, a plain name, one lowercase word): "Note: Dana Kim is mentored
 by Carla Diaz" or "Role: engineer at Delta Foods" may state the asked fact under
-another label, so such a base goes to the model.[^fast]
+another label, so such a base goes to the model. The same holds for a base with
+any card key outside the known schema (Born, Employer, Mentor, Headquarters,
+Founded, Role, Hometown, Industry): "DOB", "Firm" or "Supervisor" may carry the
+asked fact.[^fast]
+
+Tests that pass before any change give a free DONE, except when the instruction
+asks for new code (add or implement a function, method or class; hidden tests).
+A math program's int(), math.floor() and math.ceil() take a float within
+rounding noise of an integer as that integer (72 / 0.72 prints 100, not 99).
+Tables skip comment and blank lines before the header.[^solver][^context]
 
 Card questions can combine forward Mentor links with a unique inverse link
 ("the person mentored by ..."). Inverse chains require a complete, bounded

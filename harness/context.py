@@ -142,10 +142,21 @@ def is_table(path):
     return path.lower().endswith(TABLE_EXT)
 
 
+def table_skip(path):
+    """Leading lines before the header: comments ("# export 2024-05-01") and blank lines."""
+    n = 0
+    for line in read_text(path, 8192).lstrip("\ufeff").split("\n")[:20]:
+        if line.strip() and not line.lstrip().startswith("#"):
+            return n
+        n += 1
+    return 0
+
+
 def table_sep(path):
     if path.lower().endswith(".tsv"):
         return "\t"
-    head = read_text(path, 4096).split("\n", 1)[0]
+    lines = read_text(path, 8192).split("\n")
+    head = lines[table_skip(path)] if table_skip(path) < len(lines) else lines[0]
     return max(("\t", ",", ";"), key=lambda c: (head.count(c), c == ","))
 
 
@@ -181,6 +192,9 @@ def pandas_load(path, rel):
     commas = re.findall(r"\d,(\d+)", head)
     if sep == ";" and commas and all(len(x) <= 2 for x in commas) and not re.search(r"\d\.\d", head):
         args.append("decimal=','")
+    skip = table_skip(path)
+    if skip:
+        args.append("skiprows=%d" % skip)
     args.append("skipinitialspace=True, on_bad_lines='skip'")
     return "pd.read_csv(%s)" % ", ".join(args)
 
@@ -199,6 +213,8 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
     distinct, lo, hi, numeric = [], [], [], []
     try:
         with f:
+            for _ in range(table_skip(path)):
+                f.readline()
             reader = csv.reader(f, delimiter=sep)
             for row in reader:
                 if header is None:
@@ -232,9 +248,9 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
     name = name or os.path.basename(path)
     if header is None:
         return "%s: empty file" % name, {}
-    lines = ["%s (%s-separated): %d rows; columns: %s" % (name, "tab" if sep == "\t" else "comma", nrows,
-                                                         ",".join(header))]
-    lines += [",".join(r) for r in head]
+    lines = ["%s (%s-separated): %d rows; columns: %s" % (name, {"\t": "tab", ";": "semicolon"}.get(sep, "comma"),
+                                                         nrows, ",".join(header))]
+    lines += [(";" if sep == ";" else ",").join(r) for r in head]  # "2,50" stays one decimal-comma value
     info = {"header": header, "values": {}, "rows": nrows, "truncated": truncated}
     fmt = lambda x: str(int(x)) if x == int(x) else str(x)
     for i, col in enumerate(header):
