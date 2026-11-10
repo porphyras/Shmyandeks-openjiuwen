@@ -39,14 +39,33 @@ class RoutingTests(unittest.TestCase):
     def test_fallback_order(self):
         c = client()
         dead = Exception(WRAP + "404 - The model `qwen3.8-27b-noreason` does not exist.")
-        self.assertTrue(c._mark_dead(dead, "qwen3.8-27b-noreason"))
+        self.assertTrue(c._mark_dead(dead, "qwen3.8-27b-noreason", "qwen3.8-27b-noreason"))
         self.assertEqual(c.serving("qwen3.8-27b-noreason"), "qwen3.6-35b-a3b-noreason")
         # an attempt sent before the switch reports the old model: it is retried, nothing else dies
-        self.assertTrue(c._mark_dead(dead, "qwen3.8-27b-noreason"))
+        self.assertTrue(c._mark_dead(dead, "qwen3.8-27b-noreason", "qwen3.8-27b-noreason"))
         self.assertEqual(c.dead, {"qwen3.8-27b-noreason"})
         dead2 = Exception(WRAP + "404 - The model `qwen3.6-35b-a3b-noreason` does not exist.")
-        self.assertTrue(c._mark_dead(dead2, "qwen3.8-27b-noreason"))
+        self.assertTrue(c._mark_dead(dead2, "qwen3.8-27b-noreason", "qwen3.6-35b-a3b-noreason"))
         self.assertEqual(c.serving("qwen3.8-27b-noreason"), "qwen3.8-27b")
+
+    def test_parallel_attempts_are_matched_to_the_model_they_went_to(self):
+        # three attempts get 404 from 27b-noreason, are retried on 35b, all get 404 there too
+        c = client()
+        miss = lambda m: Exception(WRAP + "404 - The model `%s` does not exist." % m)
+        for _ in range(3):
+            self.assertTrue(c._mark_dead(miss(ORDER[0]), ORDER[0], ORDER[0]))
+        for _ in range(3):
+            self.assertTrue(c._mark_dead(miss(ORDER[1]), ORDER[0], ORDER[1]))
+        self.assertEqual(c.serving(ORDER[0]), ORDER[2])
+        self.assertEqual(c.dead, set(ORDER[:2]))
+
+    def test_stand_in_reasoning_model_gets_room_to_think(self):
+        c = client()
+        self.assertEqual(c._tokens_for("qwen3.8-27b-noreason", 260), 260)
+        for m in ORDER[:2]:
+            c._mark_dead(Exception(WRAP + "404 - The model `%s` does not exist." % m), m)
+        self.assertEqual(c._tokens_for("qwen3.8-27b-noreason", 260), llm.REASONING_STAND_IN_TOKENS)
+        self.assertEqual(c._tokens_for("qwen3.8-27b", 900), 900)  # the reasoning rung itself is unchanged
 
     def test_all_missing_or_unrelated_error(self):
         c = client()

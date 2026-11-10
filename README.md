@@ -10,6 +10,11 @@ what it can settle with certainty (a statement understood sentence by sentence, 
 repaired with functions verified in other tasks); everything else is solved by the model, with
 plain code gathering the context, running what the model wrote and checking the result.
 
+The agent is built on openJiuwen: every task runs as an openJiuwen `Workflow` (inspect →
+solve → finish), every model call goes through openJiuwen's `Model.invoke`, and the budget and
+the retry policy are openJiuwen rails around that call (details in
+[openJiuwen components used](#openjiuwen-components-used)).
+
 The deterministic fast path below is an accelerator for statements written in the examples'
 forms; it is never relied on for the score. The general path (inspection, one short model call,
 a free check) carries everything else and was measured on four independent sets of a different
@@ -58,9 +63,16 @@ timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
   `openjiuwen.agent_teams.workflow.engine.budget.BudgetLedger` counting in the organisers'
   units, billed from `after_model_call` the way `SwarmflowBudgetRail` does; the retry policy
   for a failed call (transport errors, rate limits, outages retried with backoff, a "quota
-  spent" answer stops new calls, a 400/404 fails just that call) is a subclass of
+  spent" answer stops new calls, a model the proxy does not serve hands its calls to the next
+  model, another 400/404 fails just that call) is a subclass of
   `openjiuwen.harness.rails.tool_call_resilience_rail.ToolCallResilienceRail` hooked on
-  `on_model_exception`.
+  `on_model_exception`;
+- `openjiuwen.core.workflow.Workflow` (`Start`, `End`, `WorkflowComponent`,
+  `create_workflow_session`; see `harness/oj_flow.py`): the pipeline of one task is a workflow
+  of three nodes - inspection and free prechecks, the model-backed solve with its budget
+  reservation, the write-out with its second opinions - built per task and run on the harness
+  event loop. The workflow state carries the task name, its rung and three flags; the planner
+  (order by expected reward per token, reservations, the second pass) schedules the workflows.
 
 The harness does not use openJiuwen's agents or tool schemas on purpose: every task is solved
 with one compact prompt, and tool schemas or conversation history would multiply the input
@@ -326,8 +338,8 @@ lower the planner's success estimate: the model looks once and may answer `IMPOS
   grader running under another uid can read it.
 - Dependencies: `openjiuwen` pulls in many packages (model SDKs, transformers, vector stores,
   telemetry); they are transitive and unused — the harness imports only
-  `openjiuwen.core.foundation.llm.model`, the logging configuration, the rail base classes
-  and the budget ledger. All bench runs under
+  `openjiuwen.core.foundation.llm.model`, the logging configuration, the rail base classes,
+  the budget ledger and the workflow engine. All bench runs under
   the judge's flags on an `--internal` Docker network showed no outbound attempts other than
   `LLM_BASE_URL`.
 - Task files are untrusted data. Programs the model writes run in a separate process session,

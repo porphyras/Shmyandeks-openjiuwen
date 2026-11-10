@@ -21,7 +21,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "cb8f82ece57b7a67814204e3c9049353b086e65ebf2b75af574ad6d365d3c0a8"
+      "sha256": "5ab3f4a61f744a54ee697a591c09cd45e7747df60b2d060b8ad99328333aa804"
     },
     {
       "id": "context",
@@ -47,6 +47,10 @@ Run.run loads the batch, inspects tasks, attempts free solutions and queues mode
 work by expected reward per cost. The Python process sees the batch; each solver
 constructs messages for an individual task. There is no shared batch-wide model
 conversation. Cross-task code reuse is an explicit crossfix operation.[^run]
+Each scheduled task runs as an openJiuwen Workflow of three nodes (inspect, solve,
+finish); the workflow state carries only the task name, its rung and the flags
+go/stop/defer, while tasks, inspections and outcomes stay in Run's registries.
+The SDK's 60-second workflow timeout is disabled; the harness keeps its own.[^flow]
 
 A math or data answer is written with exactly the decimals the task asks for
 (padding only, or Python-style rounding of extra digits; half up when stated).
@@ -60,5 +64,6 @@ Preserve the difference between original task data and a prompt projection.
 See [solvers](solving-and-verification.md) and [budget admission](budget-and-routing.md).
 
 [^context]: [Task and file inspection](../../harness/context.py).
+[^flow]: [The per-task openJiuwen Workflow](../../harness/oj_flow.py).
 [^run]: [Runtime orchestration](../../run_agent.py).
 [^io]: [Answer and summary writing](../../harness/io_utils.py).

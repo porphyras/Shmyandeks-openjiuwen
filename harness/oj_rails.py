@@ -113,7 +113,7 @@ class ProxyResilienceRail(ToolCallResilienceRail):
 
     priority = 70
 
-    def __init__(self, ledger, classify, switch_base, log, mark_dead=lambda e, model: False):
+    def __init__(self, ledger, classify, switch_base, log, mark_dead=lambda e, model, served: False):
         # the attempt budget is a time budget here (`give_up`), as in the previous retry loop
         super().__init__(max_attempts=10 ** 6)
         self.ledger = ledger
@@ -133,7 +133,7 @@ class ProxyResilienceRail(ToolCallResilienceRail):
         if kind == "budget":
             self.ledger.proxy_exhausted = True
             return
-        if kind in ("fatal", "transient") and self.mark_dead(e, ctx.extra.get("model")):
+        if kind in ("fatal", "transient") and self.mark_dead(e, ctx.extra.get("model"), ctx.extra.get("served")):
             # "model not found" (named in the error): the base URL is right, the model is not
             # served - retry the call on another model, never switch the base URL for this.
             ctx.extra["kind"] = "model"
@@ -152,9 +152,11 @@ class RailedCaller:
     """The object the rails are registered on (what an agent is to the SDK's rail chain):
     `model_call` is the one railed method, so each proxy call fires the hooks above."""
 
-    def __init__(self, resolve_model):
+    def __init__(self, resolve_model, tokens_for=lambda model, max_tokens: max_tokens, serving=lambda model: model):
         self.agent_callback_manager = AgentCallbackManager("proxy-caller-%d" % id(self))
         self.resolve_model = resolve_model
+        self.tokens_for = tokens_for
+        self.serving = serving
 
     async def register(self, *rails):
         for r in rails:
@@ -164,8 +166,12 @@ class RailedCaller:
           on_exception=AgentCallbackEvent.ON_MODEL_EXCEPTION)
     async def model_call(self, ctx, model, max_tokens, temperature, timeout):
         ctx.extra["t0"] = time.time()
+        # resolved per attempt: the base URL may have been switched, or the model found missing
+        # (a stand-in reasoning model gets room to think on this very retry)
+        ctx.extra["served"] = self.serving(model)  # the model this attempt actually goes to
+        max_tokens = self.tokens_for(model, max_tokens)
         ctx.extra["max_tokens"] = max_tokens
-        m = self.resolve_model(model)  # resolved per attempt: the base URL may have been switched
+        m = self.resolve_model(model)
         # The SDK's own timeout ends a slow attempt at `timeout` s; the outer cap is the backstop
         # for a transport that never answers (as the previous per-attempt wait was).
         msg = await asyncio.wait_for(

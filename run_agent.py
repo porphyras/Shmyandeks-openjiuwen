@@ -362,7 +362,17 @@ class Run:
         retry = []
         deferred = []  # original queue entries blocked only by in-flight reservations
 
-        def one(level, t):
+        # The per-task pipeline is an openJiuwen Workflow (harness/oj_flow.py) of three nodes -
+        # the blocking steps below, run on the node executor; a worker thread only schedules a
+        # task and reads the final state. Objects stay in these registries (the workflow state
+        # is deep-copied by the SDK); the state carries the task name, its rung and three flags.
+        from harness.oj_flow import run_task_flow
+        by_name = {t.name: t for t in tasks}
+        outcomes = {}
+        executor = ThreadPoolExecutor(max_workers=self.workers + 2, thread_name_prefix="node")
+
+        def inspect_step(d):
+            t = by_name[d["task"]]
             info = infos.get(t.name)
             if info is None:
                 info = self.solver.prepare(t)
@@ -371,7 +381,14 @@ class Run:
                 infos[t.name] = info
                 if info.get("problems") and t.kind != "coding" and not self.careful:
                     self.finish_task(t, self.precheck_outcome(t, info))
-                    return
+                    return dict(d, go=False)
+            return d
+
+        def solve_step(d):
+            if not d["go"]:
+                return d
+            t = by_name[d["task"]]
+            info = infos[t.name]
             need = info["cost"]
             with self.lock:
                 rem = self.llm.remaining()
@@ -382,20 +399,29 @@ class Run:
                            "reserved": round(self.reserved, 1)})
                     # A reservation is a forecast, not a charge. Reconsider after the
                     # active workers finish; a task beyond the actual remainder stays skipped.
-                    return "defer_budget" if temporary else None
+                    return dict(d, go=False, defer=temporary)
                 self.reserved += need
             try:
-                out = self.solver.solve(t, info, level)
+                outcomes[t.name] = self.solver.solve(t, info, d["level"])
             except BudgetExhausted:
-                raise
+                return dict(d, go=False, stop=True)
             except SkipTask:
                 trace({"ev": "skip_budget_call", "task": t.name})
-                return
+                return dict(d, go=False)
             except Exception as e:
-                out = Outcome("error", note="%s: %s" % (type(e).__name__, str(e)[:200]))
+                outcomes[t.name] = Outcome("error", note="%s: %s" % (type(e).__name__, str(e)[:200]))
             finally:
                 with self.lock:
                     self.reserved -= need
+            return d
+
+        def finish_step(d):
+            if not d["go"]:
+                return d
+            t = by_name[d["task"]]
+            info = infos[t.name]
+            level = d["level"]
+            out = outcomes.pop(t.name)
             # Only technical errors are retried later: on the bench no task that failed its
             # checks twice was ever rescued by the reasoning rung, while infeasible ones burned
             # thousands of tokens there.
@@ -404,17 +430,17 @@ class Run:
                 agree = out.answer == fast_ans
                 trace({"ev": "fast_confirm", "task": t.name, "fast": fast_ans, "model": out.answer, "agree": agree})
                 if agree or out.status != "solved":
-                    return  # the deterministic answer is already written
+                    return d  # the deterministic answer is already written
                 # Qualification and they disagree: a third opinion decides by majority.
                 try:
                     o3 = self.solver.solve(t, info, 2)
                 except Exception:
-                    return
+                    return d
                 third = o3.answer if o3.status == "solved" else None
                 if third == out.answer:
                     self.finish_task(t, out)
                 trace({"ev": "fast_third", "task": t.name, "third": third})
-                return
+                return d
             if level == 0 and (out.status == "error" or (out.status == "failed" and t.kind in self.retry_kinds
                                                              and not self.economy)):
                 with hlock:
@@ -426,12 +452,15 @@ class Run:
                 try:
                     out2 = self.solver.crosscheck(t, info, out)
                 except BudgetExhausted:
-                    raise
+                    return dict(d, stop=True)
                 except Exception as e:
                     out2 = out
                     trace({"ev": "crosscheck_error", "task": t.name, "err": type(e).__name__})
                 if out2.answer != out.answer:
                     self.finish_task(t, out2)
+            return d
+
+        steps = [("inspect", inspect_step), ("solve", solve_step), ("finish", finish_step)]
 
         def worker():
             while not STOP.is_set():
@@ -443,15 +472,18 @@ class Run:
                 if self.time_left() < 30 or self.llm.exhausted:
                     return
                 try:
-                    if one(level, t) == "defer_budget":
-                        with hlock:
-                            deferred.append(entry)
-                except BudgetExhausted:
+                    state = run_task_flow(getattr(self.llm, "loop", None), steps, executor, t.name, level,
+                                          max(60.0, self.time_left() + 90))
+                except Exception as e:
+                    trace({"ev": "worker_error", "task": getattr(t, "name", "?"), "err": "%s: %s" % (type(e).__name__, e)})
+                    continue
+                if state.get("defer"):
+                    with hlock:
+                        deferred.append(entry)
+                if state.get("stop"):
                     if self.llm.exhausted:
                         STOP.set()
                     return
-                except Exception as e:
-                    trace({"ev": "worker_error", "task": getattr(t, "name", "?"), "err": "%s: %s" % (type(e).__name__, e)})
 
         def pool():
             while True:
@@ -481,6 +513,7 @@ class Run:
                 heapq.heappush(heap, (-(t.reward * 0.3 / max(info.get("cost", 100) * 4, 1.0)), next(seq), 2, t))
             pool()
             self.rewrite_answers()
+        executor.shutdown(wait=False)
         trace({"ev": "end", "spent": round(self.llm.spent, 1), "calls": self.llm.calls,
                "by_model": self.llm.by_model, "results": _count(self.results.values()),
                "elapsed": round(time.time() - T0, 1)})

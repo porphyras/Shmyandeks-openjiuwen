@@ -57,7 +57,7 @@ class LLM:
         self.lock = threading.Lock()
         self.ledger = CostLedger(total=budget)
         self.consecutive_fail = 0
-        self.caller = RailedCaller(self._model)
+        self.caller = RailedCaller(self._model, self._tokens_for, self.serving)
         asyncio.run_coroutine_threadsafe(
             self.caller.register(ProxyBudgetRail(self.ledger),
                                  ProxyResilienceRail(self.ledger, classify_error, self._try_alt_base, self.log,
@@ -95,19 +95,27 @@ class LLM:
                 return alt
         return name
 
-    def _mark_dead(self, e, name):
-        """If the error says the proxy does not serve `name`, route its calls elsewhere. True when
-        a live replacement exists (the call is retried there)."""
+    def _tokens_for(self, name, max_tokens):
+        """A reasoning model standing in for a missing no-reasoning one gets room to think."""
+        served = self.serving(name)
+        if served != name and "noreason" in name and "noreason" not in served:
+            return max(max_tokens, REASONING_STAND_IN_TOKENS)
+        return max_tokens
+
+    def _mark_dead(self, e, name, served=None):
+        """If the error says the proxy does not serve the model this attempt went to (`served`;
+        by default the current route of `name`), route `name`'s calls elsewhere. True when a
+        live replacement exists (the call is retried there)."""
         with self.lock:
-            if name in self.dead and model_missing(e, name):
-                return self.serving(name) != name  # an attempt sent before the switch: retry it
-            name = self.serving(name)  # the model this attempt went to
-            if not model_missing(e, name):
+            served = served or self.serving(name)
+            if not model_missing(e, served):
                 return False
-            self.dead.add(name)
+            new = served not in self.dead
+            self.dead.add(served)
             alt = self.serving(name)
-        self.log({"ev": "model_missing", "model": name, "now": alt if alt != name else None})
-        return alt != name
+        if new:
+            self.log({"ev": "model_missing", "model": served, "now": alt if alt not in self.dead else None})
+        return alt not in self.dead
 
     def _model(self, name):
         name = self.serving(name)
@@ -132,10 +140,6 @@ class LLM:
         from openjiuwen.core.single_agent.rail.base import AgentCallbackContext, ModelCallInputs
         if self.exhausted:
             raise BudgetExhausted()
-        served = self.serving(model)
-        if served != model and "noreason" in model and "noreason" not in served:
-            # a reasoning model standing in for a missing no-reasoning one: room to think first
-            max_tokens = max(max_tokens, REASONING_STAND_IN_TOKENS)
         t0 = time.time()
         ctx = AgentCallbackContext(agent=self.caller, inputs=ModelCallInputs(messages=messages))
         ctx.extra.update({"tag": tag, "model": model, "give_up": t0 + max_wait})

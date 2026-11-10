@@ -21,17 +21,17 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "cb8f82ece57b7a67814204e3c9049353b086e65ebf2b75af574ad6d365d3c0a8"
+      "sha256": "5ab3f4a61f744a54ee697a591c09cd45e7747df60b2d060b8ad99328333aa804"
     },
     {
       "id": "llm",
       "resource": "../../harness/llm.py",
-      "sha256": "2c1a09762cd67fa1a09ac7d7f4327e56d1ef3c8fd1086b4511fed596b9996d6d"
+      "sha256": "91efe2fc9713ba3f62737f153e6cf06ab94bea46c2ba621ed941c1f3cd86b7c2"
     },
     {
       "id": "rails",
       "resource": "../../harness/oj_rails.py",
-      "sha256": "0a5578d060334365447908040b5c69a1ed6db51c6556559d990efc786fef9e56"
+      "sha256": "3e8e553ea992c3e4390c72290f0a83cb12e11f4e759f9896d37202f63aa21003"
     },
     {
       "id": "fit",
