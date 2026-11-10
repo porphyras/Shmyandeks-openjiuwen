@@ -31,7 +31,8 @@ changes. Update the affected knowledge page when its contract changes. After
 checking its prose against the sources, run `stamp <topic>`; never stamp merely
 to silence drift. Regenerate navigation with `index --write` when metadata changes.
 
-Offline checks need Python 3.11+ and no model credentials:
+Offline checks need Python 3.12 with `pip install -r requirements.txt` (the run
+tests import openJiuwen) and no model credentials:
 
 ```sh
 python3 -m unittest discover -s tests -v

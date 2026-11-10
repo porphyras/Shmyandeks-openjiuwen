@@ -48,7 +48,9 @@
 ---
 # Verification and evidence
 
-From the repository root, Python 3.11+ runs the standard-library offline checks:
+From the repository root, with Python 3.12 and the pinned dependencies installed
+(`pip install -r requirements.txt`: run tests import openJiuwen's Workflow), the
+offline checks need no model credentials; CI runs the same:
 
 ```sh
 python3 -m unittest discover -s tests -v
