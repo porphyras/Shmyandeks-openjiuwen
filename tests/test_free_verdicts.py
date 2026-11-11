@@ -243,6 +243,14 @@ class FactInAnotherFieldTests(unittest.TestCase):
         self.assertEqual(verdict[0], "infeasible")
 
 
+class TransliterationTests(unittest.TestCase):
+    def test_umlaut_written_out_is_the_same_name(self):
+        files = dict(CARDS)
+        files["kb/jonas.md"] = "# Jonas Müller\n\nBorn: 1970\nEmployer: Delta Foods\n"
+        out = fastpath.solve(make_task(KB + "In which year was Jonas Mueller born?", files), "search")
+        self.assertTrue(out is None or out == ("solved", "1970"), out)
+
+
 class UnknownCardKeyTests(unittest.TestCase):
     """A base with a label outside the known schema may state the asked fact under that label."""
 

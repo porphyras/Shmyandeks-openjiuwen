@@ -32,7 +32,7 @@
     {
       "id": "fast",
       "resource": "../../harness/fastpath.py",
-      "sha256": "b7893b8e5fd64e61805431b02df2cf0d596ce050afe75cc0d21dfb167c7c4b20"
+      "sha256": "2d66eddd426ece64701b00de6e690ff8da50c4938201733c3088768bb452ec7e"
     },
     {
       "id": "crossfix",

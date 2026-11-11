@@ -589,9 +589,13 @@ _ANY_ATTR = re.compile(r"What is the (%s) of %s\?" % ("|".join(re.escape(a) for 
 
 
 def _words(s):
+    """Words of a name for comparison: accents dropped (León = Leon) and the German
+    transliterations folded on both sides (Müller = Mueller = Muller, Straße = Strasse)."""
     import unicodedata
+    s = s.replace("ß", "ss").replace("ẞ", "ss")
     s = "".join(ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch))
-    return set(re.findall(r"[a-z0-9]+", s.lower()))
+    return {w.replace("ae", "a").replace("oe", "o").replace("ue", "u").replace("ss", "s")
+            for w in re.findall(r"[a-z0-9]+", s.lower())}
 
 
 def _maybe_same(a, b):
