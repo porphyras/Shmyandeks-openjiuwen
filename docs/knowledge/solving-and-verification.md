@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "68ad3d75e5b80cdece529975ea96d65c870fb717eae16f5f20772b2ef1600e1e"
+      "sha256": "0017e038780d1305f64b179112f5004b67ccb27876a84f8a59fd18ffa4e14525"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "c8d58a36dd2c62cadc2660145b52f6df188b0bee427802a30e91b3a8e46f1e73"
+      "sha256": "196318d1523beb8ea3c18bcf7b5410b6024a1c1b2005ca29c0d361e5b8925b5a"
     },
     {
       "id": "fast",
@@ -80,7 +80,12 @@ counts as pure only when proven so (unproven_functions): a plain module-level de
 decorators or mutable defaults that reads only its arguments, pure builtins and modules,
 other proven defs and scalar constants never rebound; registries, globals, class
 attributes and closures disable the verdict. A test that writes through the module
-(mock.patch, setattr, m.A.b = ..., vars(m), reload) gives none.[^solver][^context]
+(mock.patch, setattr, m.A.b = ..., vars(m), reload) gives none. A method call obj.m() required
+to equal two values counts only when pure_methods proves m leaves its object unchanged
+(reads self, calls only safe builtins, pure modules, proven helpers of any source file or
+other such methods; no class with a base outside the sources). Skipped and xfail tests are
+left out of every check. A data program's KeyError on a name from the question is retried
+once with the table columns before the task is called infeasible.[^solver][^context]
 
 fastpath answers only recognized task forms. A new form must have tests against
 nearby unsupported or ambiguous wording. crossfix reuses definitions that passed

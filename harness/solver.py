@@ -598,9 +598,11 @@ class Solver:
             return
         # "impure until proven otherwise": state the analysis cannot rule out disables a verdict
         impure = ctx.impure_functions(info["src_orig"].values()) | ctx.unproven_functions(info["src_orig"].values())
+        # methods proven not to change their object; none when sources beyond the parsed five exist
+        methods = ctx.pure_methods(info["src_orig"].values()) if len(srcs) <= 5 else set()
         for tp in tests:
             tsrc = ctx.read_text(tp, 1 << 20)
-            info["problems"] += ctx.test_contradictions(tsrc, impure)
+            info["problems"] += ctx.test_contradictions(tsrc, impure, methods)
             info["problems"] += ["test imports missing module %s" % m for m in ctx.missing_imports(tsrc, task.cwd)]
             info["problems"] += ctx.missing_fixtures(tsrc, os.path.dirname(tp), info["src_orig"].values())
         ok, out = self._run_tests(task, tests)
@@ -710,6 +712,7 @@ class Solver:
         last_err = ""
         model_code = code = ""
         label_fallback = ""  # a number printed for "which ...?", kept if the retry yields nothing better
+        key_retried = False  # a KeyError on a name from the question gets one retry with the columns
         tries = 1 if level >= 2 else 2
         for attempt in range(tries):  # the reasoning rung gets one call
             if attempt:
@@ -774,7 +777,15 @@ class Solver:
                 return Outcome("solved", ans, code=model_code)
             km = re.search(r"KeyError: ['\"]([^'\"\n]{1,60})['\"]", err or "") if rc else None
             if km and data and not self.careful and _names_missing_column(km.group(1), instr, info):
-                # The question refers to a column the tables do not have ("shipping cost").
+                # The question refers to a column the tables do not have ("shipping cost"); the
+                # program may only have misspelled it, so it gets one retry with the columns.
+                if attempt + 1 < tries and not key_retried:
+                    key_retried = True
+                    cols = "; ".join(m.group(0) for m in re.finditer(r"^[^\n]*; columns: [^\n]*", data, re.M))[:600]
+                    last_err = ("KeyError: %r is not a column. The tables: %s. Use the column that holds what the "
+                                "question means; if no column does, print IMPOSSIBLE." % (km.group(1), cols))
+                    code = model_code
+                    continue
                 return Outcome("infeasible", note="column %r named by the task is not in the data" % km.group(1))
             if rc and "ZeroDivisionError" in err and (not data or attempt) and not self.careful:
                 # A well-posed task never divides by zero (split into 0 parts); on data a first
