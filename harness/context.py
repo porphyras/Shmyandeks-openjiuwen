@@ -191,7 +191,7 @@ def pandas_load(path, rel):
     # Decimal comma only when every "d,d" looks like a decimal (1-2 digits after the comma)
     # and no decimal point is used; "1,250" is a thousands separator (handled later).
     commas = re.findall(r"\d,(\d+)", head)
-    if sep == ";" and commas and all(len(x) <= 2 for x in commas) and not re.search(r"\d\.\d", head):
+    if sep != "," and commas and all(len(x) <= 2 for x in commas) and not re.search(r"\d\.\d", head):
         args.append("decimal=','")
     skip = table_skip(path)
     if skip:
@@ -251,7 +251,7 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
         return "%s: empty file" % name, {}
     lines = ["%s (%s-separated): %d rows; columns: %s" % (name, {"\t": "tab", ";": "semicolon"}.get(sep, "comma"),
                                                          nrows, ",".join(header))]
-    lines += [(";" if sep == ";" else ",").join(r) for r in head]  # "2,50" stays one decimal-comma value
+    lines += [(sep if sep in (";", "\t", "|") else ",").join(r) for r in head]  # "2,50" stays one value
     info = {"header": header, "values": {}, "rows": nrows, "truncated": truncated}
     fmt = lambda x: str(int(x)) if x == int(x) else str(x)
     for i, col in enumerate(header):
@@ -1601,8 +1601,20 @@ def missing_imports(test_src, cwd):
                 continue  # installed in the image
         except (ImportError, ValueError):
             pass
+        if m.lower() in _KNOWN_PACKAGES:
+            continue  # a published package the grader's environment may have: the model decides
         out.append(m)
     return out
+
+
+# Well-known third-party packages: missing here does not make a task unsolvable (hidden tests may
+# run where they are installed), unlike a local module nobody wrote.
+_KNOWN_PACKAGES = {
+    "scipy", "sklearn", "scikit_learn", "torch", "tensorflow", "keras", "jax", "matplotlib", "seaborn", "plotly",
+    "sympy", "networkx", "pandas", "numpy", "requests", "httpx", "aiohttp", "flask", "django", "fastapi",
+    "pydantic", "sqlalchemy", "yaml", "toml", "tomli", "bs4", "lxml", "pil", "cv2", "pytest", "hypothesis",
+    "attr", "attrs", "dateutil", "pytz", "click", "rich", "tqdm", "numba", "polars", "pyarrow", "openpyxl",
+    "xlrd", "statsmodels", "joblib", "nltk", "spacy", "transformers", "boto3", "redis", "psycopg2", "pymongo"}
 
 
 def missing_named_files(task, files=None):

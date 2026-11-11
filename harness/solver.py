@@ -74,7 +74,16 @@ _CLEAN = """def _clean(d):
             filled = s[~s.str.lower().isin(["", "nan", "na", "n/a", "none", "null", "-"])]
             if len(filled) and filled.str.contains(r"[,$€£ ]|^\\d", regex=True).any() and \
                     not filled.str.match(r"^0\\d").any():
+                # A comma is a thousands separator only when every value with one looks like 1,250 or
+                # 12,345,678; when every such value looks like 33,50 or 1,5 it is a decimal comma.
+                commas = filled[filled.str.contains(",", regex=False)]
+                decimal_comma = len(commas) > 0 and not commas.str.match(
+                    r"^[-+]?[$€£]?\\d{1,3}(,\\d{3})+(\\.\\d+)?$").all() and commas.str.match(
+                    r"^[-+]?[$€£]?\\d+,\\d{1,2}$").all()
+
                 def conv(x):
+                    if decimal_comma:
+                        x = x.str.replace(",", ".", regex=False)
                     x = x.str.replace(r"[$€£,]", "", regex=True).str.strip()
                     out = pd.to_numeric(x, errors="coerce")
                     # a number followed only by a note: "12 (est.)", "12 kg", "7*" - never dates or codes

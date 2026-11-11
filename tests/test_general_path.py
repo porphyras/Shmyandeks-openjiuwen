@@ -207,5 +207,31 @@ class CrossfixGuardTests(unittest.TestCase):
                                                     "def f(xs):\n    return sum(xs) + 1\n"))
 
 
+class DecimalCommaTests(unittest.TestCase):
+    def clean(self, values):
+        import pandas as pd
+        ns = {"pd": pd}
+        exec(solver._CLEAN, ns)
+        return ns["_clean"](pd.DataFrame({"price": values}))["price"].tolist()
+
+    def test_decimal_comma_is_a_decimal(self):
+        self.assertEqual(self.clean(["33,50", "28,25", "10,00"]), [33.5, 28.25, 10.0])
+        self.assertEqual(self.clean(["1,5", "2,0"]), [1.5, 2.0])
+
+    def test_thousands_stay_thousands(self):
+        self.assertEqual(self.clean(["1,250", "12,345,678", "999"]), [1250, 12345678, 999])
+        self.assertEqual(self.clean(["$1,250", "$2,000"]), [1250, 2000])
+
+    def test_tab_separated_decimal_comma_loads_as_numbers(self):
+        p = write("sku\tprice\nA\t33,50\nB\t28,25\n", "t.tsv")
+        self.assertIn("decimal=','", ctx.pandas_load(p, "t.tsv"))
+        brief, _ = ctx.csv_brief(p)
+        self.assertIn("A\t33,50", brief)
+
+    def test_known_package_missing_is_not_a_verdict(self):
+        d = tempfile.mkdtemp(prefix="gp_")
+        self.assertEqual(ctx.missing_imports("import scipy\nimport mylocalhelper\n", d), ["mylocalhelper"])
+
+
 if __name__ == "__main__":
     unittest.main()
