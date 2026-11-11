@@ -12,6 +12,7 @@ source text that already passed its tests elsewhere. Tasks inspected lazily (aft
 inspection deadline) take no part.
 """
 import ast
+import os
 import builtins
 import collections
 import difflib
@@ -151,6 +152,33 @@ def _same_function(a, b):
     return MAX_EDIT_TOKENS_SAME_DOC if da else MAX_EDIT_TOKENS
 
 
+KEEP_OPS = os.environ.get("HARNESS_CROSSFIX_KEEP_OPS", "1") != "0"
+
+
+def _calls(src):
+    """Names of the calls a definition makes (s.lower(), abs(x), sorted(xs), isinstance(...))."""
+    try:
+        tree = ast.parse(textwrap.dedent(src))
+    except (SyntaxError, ValueError):
+        return None
+    out = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call):
+            f = n.func
+            out.add(f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None))
+    return out - {None}
+
+
+def _keeps_operations(cur_src, cand_src):
+    """The variant verified elsewhere must not simply drop a call the current definition makes:
+    a dropped .lower() or abs() can pass the visible tests here and fail wider hidden ones. A call
+    replaced by another (upper -> lower, sorted -> reversed: the usual planted bug) is fine."""
+    a, b = _calls(cur_src), _calls(cand_src)
+    if a is None or b is None:
+        return False
+    return not (a - b) or bool(b - a)
+
+
 def _free_names(src):
     """Names a definition reads that it does not bind itself (parameters, assignments,
     loop and comprehension targets, inner definitions, local imports)."""
@@ -269,6 +297,8 @@ def repair(solver, task, info, index):
         free = _free_names(cand_src)
         if free is None or free - _module_names(new[where[0]]):
             return None  # it relies on a helper this module does not have
+        if KEEP_OPS and not _keeps_operations(cur_src, cand_src):
+            return None  # it drops a call this definition makes: the model's job
         replaced = _replace(new[where[0]], name, cand_src)
         if replaced is None:
             return None

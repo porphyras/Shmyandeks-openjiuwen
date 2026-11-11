@@ -168,5 +168,19 @@ class DecimalsOfTheAnswerTests(unittest.TestCase):
                   "sign."), "8.0")
 
 
+class CrossfixGuardTests(unittest.TestCase):
+    def test_a_dropped_call_is_not_accepted(self):
+        from harness import crossfix
+        cur = "def count_vowels(s):\n    return sum(1 for ch in s.lower() if ch in 'aeio')\n"
+        cand = "def count_vowels(s):\n    return sum(1 for ch in s if ch in 'aeiou')\n"
+        self.assertFalse(crossfix._keeps_operations(cur, cand))
+
+    def test_a_replaced_call_is_accepted(self):
+        from harness import crossfix
+        self.assertTrue(crossfix._keeps_operations("def f(s):\n    return s.upper()\n", "def f(s):\n    return s.lower()\n"))
+        self.assertTrue(crossfix._keeps_operations("def f(xs):\n    return sorted(xs)\n",
+                                                   "def f(xs):\n    return list(reversed(xs))\n"))
+
+
 if __name__ == "__main__":
     unittest.main()
