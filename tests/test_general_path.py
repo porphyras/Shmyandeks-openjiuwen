@@ -191,6 +191,15 @@ class CrossfixGuardTests(unittest.TestCase):
         self.assertTrue(crossfix._keeps_operations("def f(s):\n    return s.upper()\n", "def f(s):\n    return s.lower()\n"))
         self.assertTrue(crossfix._keeps_operations("def f(xs):\n    return sorted(xs)\n",
                                                    "def f(xs):\n    return list(reversed(xs))\n"))
+        # the usual planted bugs: which end of the list, a copy instead of a sort, count vs len(split)
+        self.assertTrue(crossfix._keeps_operations("def pop(self):\n    return self.items.pop(0)\n",
+                                                   "def pop(self):\n    return self.items.pop()\n"))
+        self.assertTrue(crossfix._keeps_operations("def f(xs):\n    s = list(xs)\n    return s[0]\n",
+                                                   "def f(xs):\n    s = sorted(xs)\n    return s[0]\n"))
+        self.assertTrue(crossfix._keeps_operations("def f(s):\n    return s.count(' ')\n",
+                                                   "def f(s):\n    return len(s.split())\n"))
+        self.assertFalse(crossfix._keeps_operations("def f(xs, i):\n    return xs.pop(i)\n",
+                                                    "def f(xs, i):\n    return xs.pop()\n"))
 
 
 if __name__ == "__main__":

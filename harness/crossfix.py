@@ -158,10 +158,10 @@ KEEP_OPS = os.environ.get("HARNESS_CROSSFIX_KEEP_OPS", "1") != "0"
 _GUARD_STMTS = (ast.If, ast.Raise, ast.Try, ast.With, ast.Assert, ast.For, ast.While)
 # Calls that replace one another in a planted bug (upper -> lower, sorted -> reversed, min -> max).
 _CALL_FAMILIES = [{"lower", "upper", "title", "capitalize", "casefold", "swapcase"},
-                  {"sorted", "reversed", "sort", "reverse"}, {"min", "max"}, {"strip", "lstrip", "rstrip"},
+                  {"sorted", "reversed", "sort", "reverse", "list"}, {"min", "max"}, {"strip", "lstrip", "rstrip"},
                   {"startswith", "endswith"}, {"ljust", "rjust", "center"}, {"ceil", "floor", "round", "trunc"},
                   {"any", "all"}, {"isdigit", "isalpha", "isalnum", "isupper", "islower"},
-                  {"append", "insert", "extend", "add"}, {"sum", "len", "prod"}]
+                  {"append", "insert", "extend", "add"}, {"sum", "len", "prod", "count"}]
 
 
 def _features(src):
@@ -188,7 +188,11 @@ def _features(src):
             f = n.func
             name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
             if name:
-                pos[name] = max(pos.get(name, 0), len(n.args))
+                npos = len(n.args)
+                if name == "pop" and npos == 1 and isinstance(n.args[0], (ast.Constant, ast.UnaryOp)) and \
+                        ast.unparse(n.args[0]) in ("0", "-1"):
+                    npos = 0  # pop(0) / pop(-1): which end of the list, the usual planted bug, not a lost argument
+                pos[name] = max(pos.get(name, 0), npos)
     return c, pos
 
 
