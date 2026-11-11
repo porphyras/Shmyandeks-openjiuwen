@@ -35,7 +35,7 @@ organisers' command from the rules (the network `hack-net` with the proxy, `TEAM
 `LLM_*` values are theirs):
 
 ```bash
-docker build -t hack:latest .
+docker build -t hack:latest .   # on Apple Silicon: docker build --platform linux/amd64 -t hack:latest .
 TASKS=/absolute/path/to/tasks   # the directory of task folders
 chmod -R a+rwX "$TASKS"         # the container runs as root without capabilities: it can only write into world-writable folders
 timeout -k 1000s 1h docker run --rm --name "run-${TEAM}" \
@@ -74,8 +74,9 @@ LLM_BASE_URL=... LLM_API_KEY=... python run_agent.py --tasks-dir /path/to/tasks
 ```
 
 - Base image `python:3.12.13-slim-bookworm` pinned by digest; `openjiuwen==0.1.20`; all
-  dependencies pinned in `requirements.txt` (compiled for linux x86-64). Nothing is
-  downloaded at run time.
+  dependencies pinned in `requirements.txt` (compiled for linux x86-64, the judge machine; on
+  Apple Silicon build with `--platform linux/amd64`, a native arm64 build fails on the pins).
+  Nothing is downloaded at run time.
 - Works under a read-only root: openJiuwen's file logging (which by default creates
   `./logs/` on import) is switched to console-only before any other openJiuwen import;
   byte-code writing is disabled; temporary scripts go to `/tmp`.
