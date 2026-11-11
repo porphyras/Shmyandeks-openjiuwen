@@ -158,10 +158,14 @@ KEEP_OPS = os.environ.get("HARNESS_CROSSFIX_KEEP_OPS", "1") != "0"
 _GUARD_STMTS = (ast.If, ast.Raise, ast.Try, ast.With, ast.Assert, ast.For, ast.While)
 # Calls that replace one another in a planted bug (upper -> lower, sorted -> reversed, min -> max).
 _CALL_FAMILIES = [{"lower", "upper", "title", "capitalize", "casefold", "swapcase"},
-                  {"sorted", "reversed", "sort", "reverse", "list"}, {"min", "max"}, {"strip", "lstrip", "rstrip"},
+                  {"sorted", "reversed", "sort", "reverse"}, {"min", "max"}, {"strip", "lstrip", "rstrip"},
                   {"startswith", "endswith"}, {"ljust", "rjust", "center"}, {"ceil", "floor", "round", "trunc"},
                   {"any", "all"}, {"isdigit", "isalpha", "isalnum", "isupper", "islower"},
-                  {"append", "insert", "extend", "add"}, {"sum", "len", "prod", "count"}]
+                  {"append", "insert", "extend", "add"}]
+# One-way replacements: the first call may be replaced by the second, not the other way round
+# (list(xs) -> sorted(xs) adds an order, sorted(xs) -> list(xs) would lose it; s.count(" ") ->
+# len(s.split()); len -> sum or count -> len are not interchangeable in general).
+_CALL_DIRECTED = {("list", "sorted"), ("count", "len"), ("count", "split")}
 
 
 def _features(src):
@@ -214,7 +218,7 @@ def _keeps_operations(cur_src, cand_src):
     added = set(pb) - set(pa)
     for gone in set(pa) - set(pb):
         family = next((f for f in _CALL_FAMILIES if gone in f), {gone})
-        if not family & added:
+        if not family & added and not any((gone, a) in _CALL_DIRECTED for a in added):
             return False
     return True
 

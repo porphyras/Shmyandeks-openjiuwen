@@ -200,6 +200,11 @@ class CrossfixGuardTests(unittest.TestCase):
                                                    "def f(s):\n    return len(s.split())\n"))
         self.assertFalse(crossfix._keeps_operations("def f(xs, i):\n    return xs.pop(i)\n",
                                                     "def f(xs, i):\n    return xs.pop()\n"))
+        # one way only: an order or a size must not be traded away
+        self.assertFalse(crossfix._keeps_operations("def f(xs):\n    return sorted(xs)[0]\n",
+                                                    "def f(xs):\n    return list(xs)[0]\n"))
+        self.assertFalse(crossfix._keeps_operations("def f(xs):\n    return len(xs) + 1\n",
+                                                    "def f(xs):\n    return sum(xs) + 1\n"))
 
 
 if __name__ == "__main__":

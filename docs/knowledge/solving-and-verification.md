@@ -37,7 +37,7 @@
     {
       "id": "crossfix",
       "resource": "../../harness/crossfix.py",
-      "sha256": "a749e6b8688b4788da1c0c96ad02a153ec16f4bd68e8846c75c5e76efc0b679a"
+      "sha256": "ec67e8c77f92fe5f806a1936b3d5d503c9992f0f3864d68459217e949692ff81"
     }
   ]
 }
