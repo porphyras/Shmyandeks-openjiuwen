@@ -175,6 +175,17 @@ class CrossfixGuardTests(unittest.TestCase):
         cand = "def count_vowels(s):\n    return sum(1 for ch in s if ch in 'aeiou')\n"
         self.assertFalse(crossfix._keeps_operations(cur, cand))
 
+    def test_lost_guards_and_arguments(self):
+        from harness import crossfix
+        keep = crossfix._keeps_operations
+        self.assertFalse(keep("def f(x):\n    if x is None:\n        raise ValueError\n    return x + 1\n",
+                              "def f(x):\n    return x + 1\n"))                       # guard lost
+        self.assertFalse(keep("def f(xs):\n    return sorted(xs, key=len)\n",
+                              "def f(xs):\n    return sorted(xs, reverse=True)\n"))     # key= lost
+        self.assertFalse(keep("def f(x):\n    return round(x, 1)\n", "def f(x):\n    return round(x)\n"))
+        self.assertFalse(keep("def f(s):\n    return s.strip().upper()\n", "def f(s):\n    return s.lower()\n"))
+        self.assertFalse(keep("def f(xs):\n    return [x for x in xs if x > 0]\n", "def f(xs):\n    return [x for x in xs]\n"))
+
     def test_a_replaced_call_is_accepted(self):
         from harness import crossfix
         self.assertTrue(crossfix._keeps_operations("def f(s):\n    return s.upper()\n", "def f(s):\n    return s.lower()\n"))

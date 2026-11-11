@@ -37,7 +37,7 @@
     {
       "id": "crossfix",
       "resource": "../../harness/crossfix.py",
-      "sha256": "b18495f167a24a4e9b317a1f8200690d0bb753f78a4a85314bdb55e9c2a02125"
+      "sha256": "f1b1cb696f6f900be371110f41f632ea68be4e708f19a6d0b270ebfb85246f05"
     }
   ]
 }
@@ -78,9 +78,11 @@ attributes and closures disable the verdict. A test that writes through the modu
 fastpath answers only recognized task forms. A new form must have tests against
 nearby unsupported or ambiguous wording. crossfix reuses definitions that passed
 named tests elsewhere, with signature/docstring/edit-size guards and target tests;
-it is different from guessing a mutation until visible tests pass. A variant that
-drops a call the current definition makes without adding another (a lost .lower(),
-abs()) is refused: it can pass the visible tests and fail wider hidden ones.[^fast][^crossfix]
+it is different from guessing a mutation until visible tests pass. A variant must keep
+what the definition does besides the bug: guards (if/raise/try/with/assert/loops,
+comprehension conditions), keyword arguments, sort-key tuples and lambdas, positional
+arguments of calls that stay, and every call unless one of its family replaces it
+(upper -> lower); otherwise the task goes to the model.[^fast][^crossfix]
 Over a card base, a free "infeasible" or a head count needs every card value to
 be bare (a year, a plain name, one lowercase word): "Note: Dana Kim is mentored
 by Carla Diaz" or "Role: engineer at Delta Foods" may state the asked fact under

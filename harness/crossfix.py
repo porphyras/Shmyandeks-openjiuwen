@@ -155,28 +155,64 @@ def _same_function(a, b):
 KEEP_OPS = os.environ.get("HARNESS_CROSSFIX_KEEP_OPS", "1") != "0"
 
 
-def _calls(src):
-    """Names of the calls a definition makes (s.lower(), abs(x), sorted(xs), isinstance(...))."""
+_GUARD_STMTS = (ast.If, ast.Raise, ast.Try, ast.With, ast.Assert, ast.For, ast.While)
+# Calls that replace one another in a planted bug (upper -> lower, sorted -> reversed, min -> max).
+_CALL_FAMILIES = [{"lower", "upper", "title", "capitalize", "casefold", "swapcase"},
+                  {"sorted", "reversed", "sort", "reverse"}, {"min", "max"}, {"strip", "lstrip", "rstrip"},
+                  {"startswith", "endswith"}, {"ljust", "rjust", "center"}, {"ceil", "floor", "round", "trunc"},
+                  {"any", "all"}, {"isdigit", "isalpha", "isalnum", "isupper", "islower"},
+                  {"append", "insert", "extend", "add"}, {"sum", "len", "prod"}]
+
+
+def _features(src):
+    """Guards and call details of a definition: statements (if/raise/try/with/assert/loops),
+    comprehension conditions, keyword arguments (but reverse=), tuples, lambdas, and per call
+    name the largest number of positional arguments."""
     try:
         tree = ast.parse(textwrap.dedent(src))
     except (SyntaxError, ValueError):
         return None
-    out = set()
+    c, pos = collections.Counter(), {}
     for n in ast.walk(tree):
+        if isinstance(n, _GUARD_STMTS):
+            c["stmt:" + type(n).__name__] += 1
+        elif isinstance(n, ast.comprehension):
+            c["compif"] += len(n.ifs)
+        elif isinstance(n, ast.keyword) and n.arg and n.arg != "reverse":
+            c["kw:" + n.arg] += 1
+        elif isinstance(n, ast.Tuple) and isinstance(n.ctx, ast.Load) and len(n.elts) > 1:
+            c["tuple"] += 1
+        elif isinstance(n, ast.Lambda):
+            c["lambda"] += 1
         if isinstance(n, ast.Call):
             f = n.func
-            out.add(f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None))
-    return out - {None}
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+            if name:
+                pos[name] = max(pos.get(name, 0), len(n.args))
+    return c, pos
 
 
 def _keeps_operations(cur_src, cand_src):
-    """The variant verified elsewhere must not simply drop a call the current definition makes:
-    a dropped .lower() or abs() can pass the visible tests here and fail wider hidden ones. A call
-    replaced by another (upper -> lower, sorted -> reversed: the usual planted bug) is fine."""
-    a, b = _calls(cur_src), _calls(cand_src)
-    if a is None or b is None:
+    """The variant verified elsewhere must keep what the current definition does besides the
+    bug: a guard (if/raise/try/with/assert/loop, a comprehension condition), a keyword argument,
+    a sort key's tuple or lambda, a positional argument of a call that stays (round(x, 1)), and
+    any call unless one of its family takes its place (upper -> lower is the usual planted bug; a
+    lost .strip() or abs() is not). Such a loss can pass the visible tests here and fail wider
+    hidden ones, so the task goes to the model instead."""
+    fa, fb = _features(cur_src), _features(cand_src)
+    if fa is None or fb is None:
         return False
-    return not (a - b) or bool(b - a)
+    (ca, pa), (cb, pb) = fa, fb
+    if any(ca[k] > cb.get(k, 0) for k in ca):
+        return False
+    if any(n in pb and pb[n] < pa[n] for n in pa):
+        return False
+    added = set(pb) - set(pa)
+    for gone in set(pa) - set(pb):
+        family = next((f for f in _CALL_FAMILIES if gone in f), {gone})
+        if not family & added:
+            return False
+    return True
 
 
 def _free_names(src):
