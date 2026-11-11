@@ -44,6 +44,15 @@ class OutputTests(unittest.TestCase):
         self.assertIn("Ran 1 test", err)
         self.assertTrue(err.rstrip().endswith("OK"))
 
+    def test_model_programs_keep_the_safe_env(self):
+        # -s -P instead of -I: PYTHONHASHSEED=0 applies (set order is the same in every run),
+        # no user site, the script's /tmp folder stays off sys.path
+        src = "import sys\nprint(sys.flags.hash_randomization, sys.flags.no_user_site, sys.flags.safe_path)\n" \
+              "print(list({'w%d' % i for i in range(30)}))"
+        runs = [sandbox.run_python_code(src, tempfile.mkdtemp()) for _ in range(3)]
+        self.assertEqual(runs[0][1].splitlines()[0], "0 1 True")
+        self.assertEqual(len({r[1] for r in runs}), 1)
+
     def test_one_blas_thread(self):
         rc, out, err = run_py("import os\nprint(os.environ.get('OPENBLAS_NUM_THREADS'), os.environ.get('OMP_NUM_THREADS'))")
         self.assertEqual(out.strip(), "1 1")

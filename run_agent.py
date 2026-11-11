@@ -23,7 +23,8 @@ import json  # noqa: E402
 import signal  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
-from concurrent.futures import ThreadPoolExecutor, wait  # noqa: E402
+from concurrent.futures import CancelledError, ThreadPoolExecutor, wait  # noqa: E402
+from concurrent.futures import TimeoutError as FuturesTimeout  # noqa: E402
 
 T0 = time.time()
 STOP = threading.Event()
@@ -48,6 +49,7 @@ COST_FIT = {"math": (67.5, 0.1191, 40.1, 1.78), "data": (13.8, 0.1086, 30.5, 1.9
 # search: log(cost) = a + b*log(1+chars) + c*prose for the median, then the same for the p90
 SEARCH_FIT = (-1.234, 0.75, 0.1, 2.499, 0.375, 0.6)
 KB_LARGE, KB_LARGE_FACTOR = 20 * 1024, 2.5  # search over a knowledge base of 20 KB or more
+LATE_INSPECT_WAIT = 120.0  # an inspection still running after the deadline is awaited this long
 PHASE2_SHARE = 0.15  # phase 2 (refusals rechecked on the reasoning rung) spends at most this share
 REASONING_MAX_TOKENS = 1500
 
@@ -232,11 +234,31 @@ class Run:
 
         ex = ThreadPoolExecutor(max_workers=8)
         futs = {ex.submit(prep, t): t for t in tasks}
+        self.prep_futs = {t.name: f for f, t in futs.items()}
         done, _pending = wait(futs, timeout=deadline_s)
         for f in done:
             infos[futs[f].name] = f.result()
         ex.shutdown(wait=False, cancel_futures=True)
         return infos
+
+    def late_inspection(self, t):
+        """Inspection of a task not ready by the deadline. One still running is awaited, not
+        started again (two inspections of one folder run its tests side by side, and one's
+        cleanup can remove the other's files); one cancelled before it started runs here.
+        None: still running after the wait - the task is skipped."""
+        f = getattr(self, "prep_futs", {}).get(t.name)
+        if f is not None and not f.cancelled():
+            try:
+                info = f.result(timeout=max(1.0, min(LATE_INSPECT_WAIT, self.time_left() - 60.0)))
+                trace({"ev": "inspect_late", "task": t.name, "how": "awaited"})
+                return info
+            except FuturesTimeout:
+                trace({"ev": "inspect_late", "task": t.name, "how": "timeout"})
+                return None
+            except CancelledError:
+                pass
+        trace({"ev": "inspect_late", "task": t.name, "how": "started"})
+        return self.solver.prepare(t)
 
     def finish_task(self, task, outcome):
         from harness.io_utils import write_answer
@@ -345,7 +367,8 @@ class Run:
         trace({"ev": "start", "tasks": len(tasks), "careful": self.careful, "dir": self.tasks_dir,
                "workers": self.workers, "budget": self.llm.budget})
         self.check_writable(tasks)
-        infos = self.prepare_all(tasks, deadline_s=max(30.0, min(240.0, self.time_left() / 6)))
+        infos = self.prepare_all(tasks, deadline_s=env_float("HARNESS_INSPECT_DEADLINE",
+                                                             max(30.0, min(240.0, self.time_left() / 6))))
         self.infos = infos
         # Functions that passed their tests in one code task, to repair the same functions
         # broken in another task without the model (harness/crossfix.py).
@@ -427,7 +450,9 @@ class Run:
             t = by_name[d["task"]]
             info = infos.get(t.name)
             if info is None:
-                info = self.solver.prepare(t)
+                info = self.late_inspection(t)
+                if info is None:
+                    return dict(d, go=False)  # inspection hung: skipped, never inspected twice
                 t.kind = info.get("kind", "math")
                 info["p"], info["cost"] = self.estimate(t, info)
                 infos[t.name] = info

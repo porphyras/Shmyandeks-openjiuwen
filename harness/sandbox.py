@@ -132,7 +132,10 @@ def run_python_code(code, cwd, timeout=20):
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(code)
-        return run([PYTHON, "-I", path], cwd, timeout)
+        # -s -P, not -I: -I implies -E, which would drop SAFE_ENV's PYTHONHASHSEED=0 (set order
+        # of strings, hence ties, would change from run to run) and the bytecode settings.
+        # The environment is SAFE_ENV only; -P keeps /tmp (the script's folder) off sys.path.
+        return run([PYTHON, "-s", "-P", path], cwd, timeout)
     finally:
         try:
             os.unlink(path)

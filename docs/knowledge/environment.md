@@ -31,7 +31,7 @@
     {
       "id": "sandbox",
       "resource": "../../harness/sandbox.py",
-      "sha256": "705207c488f77a76971705be4aadfe4f57be36dd6ab281383077b6d69be63570"
+      "sha256": "0f011fe42fa86bd35349be6e63a64a2d0df4636bb24d8c06aa1221ad06417ff1"
     },
     {
       "id": "llm",
@@ -41,7 +41,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "616c53ac9e5bbfddc764240b861db1719e7b5f4886ffb02a166df5b73059974d"
+      "sha256": "106bc08f393b2e02d309c5169e1fabc909b3db0ab77869c8f347c5067e3f0179"
     },
     {
       "id": "deps",
@@ -82,7 +82,8 @@ does not serve is handled by the fallback and prints no hint.[^run][^llm]
 
 sandbox.py defines the interpreter, clean environment, subprocess launcher,
 timeouts, output capture and resource limits. Model programs execute in task
-working directories with one BLAS/OpenMP thread; output over the cap keeps its
+working directories with one BLAS/OpenMP thread, under -s -P rather than -I so that
+SAFE_ENV's PYTHONHASHSEED=0 keeps set order the same from run to run; output over the cap keeps its
 first and last halves, so the answer line and the unittest summary survive. This process boundary is not a separate per-task filesystem:
 answer/source protection and the judge's container restrictions serve different
 purposes.[^sandbox]

@@ -21,7 +21,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "616c53ac9e5bbfddc764240b861db1719e7b5f4886ffb02a166df5b73059974d"
+      "sha256": "106bc08f393b2e02d309c5169e1fabc909b3db0ab77869c8f347c5067e3f0179"
     },
     {
       "id": "context",
@@ -56,6 +56,10 @@ Each scheduled task runs as an openJiuwen Workflow of three nodes (inspect, solv
 finish); the workflow state carries only the task name, its rung and the flags
 go/stop/defer, while tasks, inspections and outcomes stay in Run's registries.
 The SDK's 60-second workflow timeout is disabled; the harness keeps its own.[^flow]
+Inspection runs in parallel up to a deadline (30-240 s); a task not inspected by then
+is queued last and its inspect node awaits the inspection still running (up to
+LATE_INSPECT_WAIT, then the task is skipped) or runs one that was cancelled before it
+started, so a task folder is never inspected twice at once.[^run]
 
 A math or data answer is written with exactly the decimals the task asks for its
 answer (padding only, or Python-style rounding of extra digits; half up when
