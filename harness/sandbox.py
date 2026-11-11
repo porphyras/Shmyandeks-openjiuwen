@@ -24,6 +24,12 @@ SAFE_ENV = {
     "PYTHONIOENCODING": "utf-8",
     "MPLBACKEND": "Agg",
     "MPLCONFIGDIR": "/tmp/mpl",
+    # One BLAS/OpenMP thread: os.cpu_count() in the judge's container is the host's (88), not the
+    # --cpus quota, and a thread per CPU in each program presses on --pids-limit and RLIMIT_AS.
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
 }
 MAX_OUT = 64 * 1024
 FILE_LIMIT = 32 << 20  # RLIMIT_FSIZE: also caps the captured output files
@@ -65,8 +71,17 @@ def _limits():
 
 
 def _read_head(f):
+    """The output, or its first and last MAX_OUT/2 bytes: the end carries the answer line and
+    unittest's "Ran N tests" / "OK"."""
+    size = f.seek(0, 2)
     f.seek(0)
-    return f.read(MAX_OUT).decode("utf-8", "replace")
+    if size <= MAX_OUT:
+        return f.read().decode("utf-8", "replace")
+    half = MAX_OUT // 2
+    head = f.read(half)
+    f.seek(size - half)
+    return (head.decode("utf-8", "replace") + "\n...[%d bytes skipped]...\n" % (size - 2 * half)
+            + f.read(half).decode("utf-8", "replace"))
 
 
 def run(argv, cwd, timeout=20):

@@ -21,7 +21,7 @@
     {
       "id": "docker",
       "resource": "../../Dockerfile",
-      "sha256": "5d62d5b5d63eeba81c6de96fb75e7020c1c322bd5c237da7e3fb3fd0b7af74bd"
+      "sha256": "e7cde5a2eecadb8f7cfb98d7baa698ed462e9bd70dae61ea0fff3da67ac23672"
     },
     {
       "id": "ignore",
@@ -31,7 +31,7 @@
     {
       "id": "sandbox",
       "resource": "../../harness/sandbox.py",
-      "sha256": "eebfb5b134b4a6ef4185d5bfd3f37441a3b140aa7a681a3a42e356ff4a3d9678"
+      "sha256": "705207c488f77a76971705be4aadfe4f57be36dd6ab281383077b6d69be63570"
     },
     {
       "id": "llm",
@@ -41,7 +41,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "550914e2c3046986e2896e3dca894eed86b5bc4c23567a1c1182ee58272ea9f9"
+      "sha256": "616c53ac9e5bbfddc764240b861db1719e7b5f4886ffb02a166df5b73059974d"
     },
     {
       "id": "deps",
@@ -59,7 +59,9 @@
 # Execution environment and SDK boundary
 
 Dockerfile owns the image and installation; its ENV turns off model-hub downloads
-and telemetry exporters of SDK paths the harness never calls (HF_*_OFFLINE, OTEL_*).
+and telemetry exporters of SDK paths the harness never calls (HF_*_OFFLINE, OTEL_*)
+and keeps BLAS/OpenMP to one thread (the container sees the host's CPU count, not
+the --cpus quota).
 While no model call has succeeded, a line on stderr each minute says the run is
 waiting for the proxy (the policy is to wait, not to quit). requirements.in names direct packages,
 and requirements.txt locks the resolved graph. Consult the files for versions.
@@ -80,7 +82,8 @@ does not serve is handled by the fallback and prints no hint.[^run][^llm]
 
 sandbox.py defines the interpreter, clean environment, subprocess launcher,
 timeouts, output capture and resource limits. Model programs execute in task
-working directories. This process boundary is not a separate per-task filesystem:
+working directories with one BLAS/OpenMP thread; output over the cap keeps its
+first and last halves, so the answer line and the unittest summary survive. This process boundary is not a separate per-task filesystem:
 answer/source protection and the judge's container restrictions serve different
 purposes.[^sandbox]
 

@@ -164,7 +164,7 @@ class Run:
         if reasoning:
             # A cap on all reasoning calls together (15 % of a known budget, else 15k units): they
             # rescue about 2 of 3 failed tasks, but must not eat the budget on a heavy set.
-            spent_r = sum(v[1] for m, v in self.llm.by_model.items() if not m.endswith("noreason"))
+            spent_r = sum(v[1] for m, v in list(self.llm.by_model.items()) if not m.endswith("noreason"))
             cap = 0.15 * self.llm.budget if self.llm.budget else env_float("HARNESS_REASONING_CAP", 15000.0)
             if spent_r + max_tokens * 0.5 > cap:
                 raise SkipTask()
@@ -581,7 +581,7 @@ class Run:
         executor.shutdown(wait=False)
         self.say_done()
         trace({"ev": "end", "spent": round(self.llm.spent, 1), "calls": self.llm.calls,
-               "by_model": self.llm.by_model, "results": _count(self.results.values()),
+               "by_model": dict(self.llm.by_model), "results": _count(list(self.results.values())),
                "elapsed": round(time.time() - T0, 1)})
 
 

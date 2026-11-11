@@ -21,7 +21,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "550914e2c3046986e2896e3dca894eed86b5bc4c23567a1c1182ee58272ea9f9"
+      "sha256": "616c53ac9e5bbfddc764240b861db1719e7b5f4886ffb02a166df5b73059974d"
     },
     {
       "id": "llm",
