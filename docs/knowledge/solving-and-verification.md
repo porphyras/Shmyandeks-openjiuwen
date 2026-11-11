@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "c1a7a3edae5d6e5e3aca5fb5a5c1bd031a879d386f4949360b9b8f3b65812b0b"
+      "sha256": "f9974bc3c5eca648cec4f20ab155ad8220142c8b329ddecf627055195c97363b"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "f049ab18961ac7f47b4d7e9ac1ab47de62a9ae1fce80b9af9e6fba675d73c420"
+      "sha256": "cdc61b434f228cfec7fad6ba6cefa7a7fa5a4be540cd3969d3d4f71a1410dd85"
     },
     {
       "id": "fast",

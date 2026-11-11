@@ -272,6 +272,37 @@ def quoted_terms(instruction):
     return [m for m in re.findall(r"'([^'\n]{1,40})'|\"([^\"\n]{1,40})\"", instruction) for m in m if m]
 
 
+def excel_brief(path, rel, max_sheets=5, rows=3):
+    """An Excel workbook as text: each sheet's size, the header row found (the first of the top 10
+    whose non-empty cells are all text and fill at least half the width), the first data rows and
+    the pandas call that loads it - instead of the zip bytes."""
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception as e:
+        return "%s: an Excel workbook that could not be read here (%s)" % (rel, type(e).__name__)
+    out = ["%s (Excel workbook, sheets: %s)" % (rel, ", ".join(repr(n) for n in wb.sheetnames))]
+    try:
+        for name in wb.sheetnames[:max_sheets]:
+            ws = wb[name]
+            top = [list(r) for r in ws.iter_rows(min_row=1, max_row=10 + rows, values_only=True)]
+            width = max((len([c for c in r if c not in (None, "")]) for r in top), default=0)
+            k = next((i for i, r in enumerate(top[:10])
+                      if (cells := [c for c in r if c not in (None, "")]) and len(cells) >= max(1, width / 2)
+                      and all(isinstance(c, str) for c in cells)), 0)
+            header = [str(c) if c is not None else "" for c in (top[k] if top else [])]
+            while header and header[-1] == "":
+                header.pop()
+            data = [", ".join("" if c is None else str(c) for c in r[:len(header) or None]) for r in top[k + 1:k + 1 + rows]]
+            out.append("sheet %r: about %s rows x %s columns; header at row %d: %s; load with "
+                       "pd.read_excel(%r, sheet_name=%r, header=%d)" % (
+                           name, ws.max_row, ws.max_column, k + 1, ", ".join(header), rel, name, k))
+            out += ["  " + d for d in data if d.strip(", ")]
+    finally:
+        wb.close()
+    return "\n".join(out)[:1500]
+
+
 def data_context(task):
     """Returns (context_text, problems) for a workspace with data files."""
     parts, problems, csv_infos, table_paths, soft = [], [], [], [], []
@@ -283,6 +314,11 @@ def data_context(task):
             parts.append(brief)
             csv_infos.append(info)
             table_paths.append(p)
+        elif p.lower().endswith((".xlsx", ".xlsm")):
+            parts.append(excel_brief(p, rel))
+        elif p.lower().endswith((".parquet", ".feather", ".arrow")):
+            parts.append("%s: a binary columnar file (%d bytes); pd.read_parquet / read_feather are NOT available "
+                         "here (no pyarrow or fastparquet)." % (rel, os.path.getsize(p)))
         else:
             t = read_text(p, 600)
             parts.append("%s:\n%s" % (rel, t[:600]))

@@ -81,8 +81,15 @@ _CLEAN = """def _clean(d):
                     r"^[-+]?[$€£]?\\d{1,3}(,\\d{3})+(\\.\\d+)?$").all() and commas.str.match(
                     r"^[-+]?[$€£]?\\d+,\\d{1,2}$").all()
 
+                # European grouping: 1.234,56 / 2.500,00 (dots group thousands, the comma is decimal)
+                euro = len(commas) > 0 and commas.str.match(
+                    r"^[-+]?[$€£]?\\d{1,3}(\\.\\d{3})+,\\d+$").any() and commas.str.match(
+                    r"^[-+]?[$€£]?\\d{1,3}(\\.\\d{3})*,\\d+$").all()
+
                 def conv(x):
-                    if decimal_comma:
+                    if euro:
+                        x = x.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+                    elif decimal_comma:
                         x = x.str.replace(",", ".", regex=False)
                     x = x.str.replace(r"[$€£,]", "", regex=True).str.strip()
                     out = pd.to_numeric(x, errors="coerce")

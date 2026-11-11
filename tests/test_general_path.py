@@ -218,6 +218,9 @@ class DecimalCommaTests(unittest.TestCase):
         self.assertEqual(self.clean(["33,50", "28,25", "10,00"]), [33.5, 28.25, 10.0])
         self.assertEqual(self.clean(["1,5", "2,0"]), [1.5, 2.0])
 
+    def test_european_grouping(self):
+        self.assertEqual(self.clean(["1.234,56", "2.500,00", "33,50"]), [1234.56, 2500.0, 33.5])
+
     def test_thousands_stay_thousands(self):
         self.assertEqual(self.clean(["1,250", "12,345,678", "999"]), [1250, 12345678, 999])
         self.assertEqual(self.clean(["$1,250", "$2,000"]), [1250, 2000])
@@ -231,6 +234,27 @@ class DecimalCommaTests(unittest.TestCase):
     def test_known_package_missing_is_not_a_verdict(self):
         d = tempfile.mkdtemp(prefix="gp_")
         self.assertEqual(ctx.missing_imports("import scipy\nimport mylocalhelper\n", d), ["mylocalhelper"])
+
+
+class ExcelBriefTests(unittest.TestCase):
+    def test_sheets_header_row_and_load_line(self):
+        import openpyxl
+        d = tempfile.mkdtemp(prefix="gp_")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Report"
+        ws.append(["Quarterly sales report"])
+        ws.append([])
+        ws.append(["region", "units", "price"])
+        ws.append(["west", 5, 33.5])
+        wb.create_sheet("Notes").append(["note"])
+        p = os.path.join(d, "sales.xlsx")
+        wb.save(p)
+        brief = ctx.excel_brief(p, "sales.xlsx")
+        self.assertIn("'Report', 'Notes'", brief)
+        self.assertIn("header at row 3: region, units, price", brief)
+        self.assertIn("pd.read_excel('sales.xlsx', sheet_name='Report', header=2)", brief)
+        self.assertIn("west, 5, 33.5", brief)
 
 
 if __name__ == "__main__":

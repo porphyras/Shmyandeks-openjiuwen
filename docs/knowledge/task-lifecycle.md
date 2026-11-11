@@ -26,7 +26,7 @@
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "f049ab18961ac7f47b4d7e9ac1ab47de62a9ae1fce80b9af9e6fba675d73c420"
+      "sha256": "cdc61b434f228cfec7fad6ba6cefa7a7fa5a4be540cd3969d3d4f71a1410dd85"
     },
     {
       "id": "flow",
@@ -61,6 +61,8 @@ A math or data answer is written with exactly the decimals the task asks for its
 answer (padding only, or Python-style rounding of extra digits; half up when
 stated); a sentence describing the data ("prices are stored with 2 decimal
 places") does not count, and a question asking for a whole number keeps it.
+An Excel workbook is shown as text (sheets, the header row found, first rows and the
+pd.read_excel call that loads it); parquet/feather files are named as not readable here.
 The output contract is answer.txt in the task directory and, when present, its
 workspace. Coding tasks also leave modified source files. Summary optionally
 writes solutions.json and token_estimates.json. Per-task answers are persisted
