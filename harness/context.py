@@ -1545,38 +1545,105 @@ def _self_contradictions(asserts, mods, funcs, impure=frozenset()):
     return out
 
 
-def missing_fixtures(test_src, cwd):
-    """Files a test reads by a literal path that do not exist (only the source may be edited)."""
+_FIXTURE_HARMLESS = re.compile(r"(open|io\.open|Path|pathlib\.Path|print|len|str|int|float|bool|list|dict|set|tuple|"
+                               r"sorted|range|enumerate|zip|os\.path\.\w+|self\.assert\w*|\w+\.read\w*|"
+                               r"json\.loads?|csv\.\w+)$")
+_SETUP_NAMES = ("setUp", "setUpClass", "setup_method", "setup_class", "setUpModule", "setup_module")
+
+
+def _const_path(call):
+    if call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
+        return call.args[0].value
+    return None
+
+
+def missing_fixtures(test_src, cwd, sources=()):
+    """Files a test reads by a literal path that do not exist (only the source may be edited).
+    A read counts only when nothing before it could have produced the file: open() for reading
+    (or Path("x").read_text()/open()) with no earlier call in its function other than harmless
+    builtins/asserts, no setUp-style hook or module-level statement that calls anything, the name
+    not in the task's sources and the path not passed to a call."""
     try:
         tree = ast.parse(test_src)
     except SyntaxError:
         return []
-    reads, writes = set(), set()
+    if any(isinstance(n, ast.Attribute) and n.attr in ("write_text", "write_bytes", "mkdir", "touch", "makedirs",
+                                                       "copy", "copyfile", "copytree", "mkstemp", "mkdtemp",
+                                                       "TemporaryDirectory", "NamedTemporaryFile") for n in ast.walk(tree)):
+        return []
+    parent = {}
     for n in ast.walk(tree):
-        if isinstance(n, ast.Call) and ast.unparse(n.func) in ("open", "io.open", "Path", "pathlib.Path") and n.args \
-                and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str):
-            path = n.args[0].value
+        for c in ast.iter_child_nodes(n):
+            parent[c] = n
+
+    def scope(n):
+        while n in parent and not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            n = parent[n]
+        return n if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) else tree
+
+    def producing(n):
+        return isinstance(n, ast.Call) and not _FIXTURE_HARMLESS.match(ast.unparse(n.func))
+
+    def calls_before(fn, node):
+        pos = (node.lineno, node.col_offset)
+        return any(producing(c) and (c.lineno, c.col_offset) < pos for c in ast.walk(fn) if c is not node)
+
+    # setUp-style hooks and module-level statements that call code may create the file first
+    hooks = any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in _SETUP_NAMES
+                and any(producing(c) for c in ast.walk(n)) for n in ast.walk(tree))
+    module_calls = any(producing(c) for st in tree.body
+                       if not isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.If,
+                                              ast.Import, ast.ImportFrom))
+                       for c in ast.walk(st))
+    reads, writes = {}, set()
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        f = ast.unparse(n.func)
+        if f in ("open", "io.open") and _const_path(n):
             mode = ""
             if len(n.args) > 1 and isinstance(n.args[1], ast.Constant):
                 mode = str(n.args[1].value)
             for k in n.keywords:
                 if k.arg == "mode" and isinstance(k.value, ast.Constant):
                     mode = str(k.value.value)
-            (writes if any(ch in mode for ch in "wax+") else reads).add(path)
-    if any(isinstance(n, ast.Attribute) and n.attr in ("write_text", "write_bytes", "mkdir", "touch", "makedirs",
-                                                       "copy", "copyfile", "copytree", "mkstemp", "mkdtemp",
-                                                       "TemporaryDirectory", "NamedTemporaryFile") for n in ast.walk(tree)):
-        return []
-    # A path also passed to the code under test (m.export("report.csv")) is produced by it.
+            if any(ch in mode for ch in "wax+"):
+                writes.add(_const_path(n))
+            else:
+                reads.setdefault(_const_path(n), []).append(n)
+        elif isinstance(n.func, ast.Attribute) and n.func.attr in ("read_text", "read_bytes", "open") \
+                and isinstance(n.func.value, ast.Call) and ast.unparse(n.func.value.func) in ("Path", "pathlib.Path") \
+                and _const_path(n.func.value) and not (n.args and isinstance(n.args[0], ast.Constant)
+                                                        and any(ch in str(n.args[0].value) for ch in "wax+")):
+            reads.setdefault(_const_path(n.func.value), []).append(n)
+    # A path also passed to the code under test (m.export("report.csv"), or out = "x.csv";
+    # export(out)) is produced by it.
+    bound = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+            v = n.value
+            if isinstance(v, ast.Call) and ast.unparse(v.func) in ("Path", "pathlib.Path"):
+                v = v.args[0] if v.args else None
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                bound[n.targets[0].id] = v.value
     produced = set()
     for n in ast.walk(tree):
-        if isinstance(n, ast.Call) and not (ast.unparse(n.func) in ("open", "io.open", "Path", "pathlib.Path")):
+        if isinstance(n, ast.Call) and ast.unparse(n.func) not in ("open", "io.open", "Path", "pathlib.Path"):
             for a in list(n.args) + [k.value for k in n.keywords]:
                 if isinstance(a, ast.Constant) and isinstance(a.value, str):
                     produced.add(a.value)
-    reads -= produced
-    return ["test reads missing file %s" % p for p in sorted(reads - writes)
-            if re.search(r"\.\w{1,5}$", p) and not os.path.exists(os.path.join(cwd, p))]
+                elif isinstance(a, ast.Name) and a.id in bound:
+                    produced.add(bound[a.id])
+    src_text = "\n".join(s for s in sources if s)
+    out = []
+    for path, nodes in sorted(reads.items()):
+        if path in writes or path in produced or not re.search(r"\.\w{1,5}$", path) \
+                or os.path.exists(os.path.join(cwd, path)) or os.path.basename(path) in src_text:
+            continue
+        if hooks or module_calls or all(calls_before(scope(n), n) for n in nodes):
+            continue
+        out.append("test reads missing file %s" % path)
+    return out
 
 
 def _module_in_tree(cwd, m):

@@ -126,34 +126,86 @@ except Exception:
 print(_r.item() if hasattr(_r, 'item') else _r)"""
 
 
-# Used only when running a test file as a script did not execute unittest.main().
-# Loading the suite also runs TestCase classes that have no __main__ entry point.
+# Used when running a test file as a script did not execute unittest.main(), or when the file
+# also holds pytest-style tests the script run skips. Loading the suite also runs TestCase
+# classes that have no __main__ entry point; plain test functions and plain Test* classes (no
+# TestCase base, no __init__, pytest's rule) run as unittest cases, with setup_class /
+# setup_method / teardown_method. A test that needs a pytest fixture argument fails here
+# (TypeError) and the task goes to the model.
 _DISCOVER_TESTS = """import importlib, inspect, sys, unittest
 sys.path.insert(0, '.')
 module = importlib.import_module(sys.argv[1])
 loader = unittest.TestLoader()
 suite = loader.loadTestsFromModule(module)
+def check(case, value):
+    if inspect.isawaitable(value):
+        if inspect.iscoroutine(value):
+            value.close()
+        case.fail('Async test needs an async test runner')
+def call_hook(hook, method):
+    try:
+        takes = len(inspect.signature(hook).parameters)
+    except (TypeError, ValueError):
+        takes = 0
+    return hook(method) if takes else hook()
 class PlainTests(unittest.TestCase):
     pass
 def wrap(func):
     def test(self):
-        value = func()
-        if inspect.isawaitable(value):
-            if inspect.iscoroutine(value):
-                value.close()
-            self.fail('Async test needs an async test runner')
+        check(self, func())
     return test
 for name in sorted(vars(module)):
     func = getattr(module, name)
-    if name.startswith('test') and inspect.isfunction(func):
+    if name.startswith('test') and inspect.isfunction(func) and getattr(func, '__test__', True):
         setattr(PlainTests, name, wrap(func))
 suite.addTests(loader.loadTestsFromTestCase(PlainTests))
+def wrap_method(cls, mname):
+    def test(self):
+        setup_class = getattr(cls, 'setup_class', None)
+        if callable(setup_class) and not getattr(cls, '_setup_class_done', False):
+            setup_class()
+            cls._setup_class_done = True
+        obj = cls()
+        method = getattr(obj, mname)
+        if callable(getattr(obj, 'setup_method', None)):
+            call_hook(obj.setup_method, method)
+        try:
+            check(self, method())
+        finally:
+            if callable(getattr(obj, 'teardown_method', None)):
+                call_hook(obj.teardown_method, method)
+    return test
+for name in sorted(vars(module)):
+    cls = getattr(module, name)
+    if not (name.startswith('Test') and inspect.isclass(cls)) or issubclass(cls, unittest.TestCase) \\
+            or cls.__init__ is not object.__init__ or not getattr(cls, '__test__', True):
+        continue
+    methods = {m: wrap_method(cls, m) for m in sorted(dir(cls))
+               if m.startswith('test') and callable(getattr(cls, m)) and getattr(getattr(cls, m), '__test__', True)}
+    if methods:
+        suite.addTests(loader.loadTestsFromTestCase(type(name, (unittest.TestCase,), methods)))
 if not suite.countTestCases():
     print('No runnable tests discovered', file=sys.stderr)
     sys.exit(1)
 result = unittest.TextTestRunner().run(suite)
 sys.exit(0 if result.wasSuccessful() else 1)
 """
+
+
+def _has_plain_tests(src):
+    """A test file with pytest-style tests (a top-level test function or a Test* class without a
+    TestCase base): a script run with unittest.main() would skip them."""
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return False
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test"):
+            return True
+        if isinstance(n, ast.ClassDef) and n.name.startswith("Test") and \
+                not any(ast.unparse(b).endswith("TestCase") for b in n.bases):
+            return True
+    return False
 
 
 class Outcome:
@@ -466,7 +518,7 @@ class Solver:
             rc, out, err = sandbox.run([sandbox.PYTHON, os.path.basename(tp)], os.path.dirname(tp),
                                        timeout=min(30.0, left))
             log = err + out
-            if rc == 0 and not re.search(r"^Ran \d+ test", log, re.M):
+            if rc == 0 and (not re.search(r"^Ran \d+ test", log, re.M) or _has_plain_tests(ctx.read_text(tp, 1 << 20))):
                 # Discover both unittest classes and plain functions; importing a class
                 # definition alone is not evidence that its tests passed.
                 left = t_end - time.time()
@@ -512,7 +564,7 @@ class Solver:
             tsrc = ctx.read_text(tp, 1 << 20)
             info["problems"] += ctx.test_contradictions(tsrc, impure)
             info["problems"] += ["test imports missing module %s" % m for m in ctx.missing_imports(tsrc, task.cwd)]
-            info["problems"] += ctx.missing_fixtures(tsrc, os.path.dirname(tp))
+            info["problems"] += ctx.missing_fixtures(tsrc, os.path.dirname(tp), info["src_orig"].values())
         ok, out = self._run_tests(task, tests)
         # Passing tests prove nothing when the task asks for new code ("Add a function average(xs)
         # ...; hidden tests will check it"): such a task goes to the model.

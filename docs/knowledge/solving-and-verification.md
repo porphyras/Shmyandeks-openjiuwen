@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "f9974bc3c5eca648cec4f20ab155ad8220142c8b329ddecf627055195c97363b"
+      "sha256": "0938f9cadb57956dfaab3cd1459915e872f81c395e967ba711c73e0cb27c7139"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "cdc61b434f228cfec7fad6ba6cefa7a7fa5a4be540cd3969d3d4f71a1410dd85"
+      "sha256": "07a87448dc2e99debe5bb22506eaa79342d52953f22fed9fe9eb889c13c68aff"
     },
     {
       "id": "fast",
@@ -64,8 +64,13 @@ answer found verbatim in those paragraphs (or a number for a counting question)
 is accepted; otherwise the verdict stays infeasible.[^solver][^context]
 A test-success verdict controls DONE; it is not proof of hidden-test correctness.
 Inspect _run_tests_once when extending supported test styles.[^solver]
-It discovers unittest classes without a main entry point and plain test functions;
-an empty suite cannot establish success. Test contradictions do not infer
+It discovers unittest classes without a main entry point, plain test functions and
+pytest-style Test* classes (no TestCase base, no __init__; setup_class/setup_method/
+teardown_method), also when unittest.main() in the file would skip them; a test that
+needs a pytest fixture argument fails there and goes to the model, and an empty suite
+cannot establish success. A missing-file verdict needs a literal read (open, or
+Path(...).read_text) with no earlier call in its test, setUp hook or module code that
+could create the file, a name absent from the sources and not passed to a call. Test contradictions do not infer
 permutation invariance from function names alone. They also catch a pure call
 required to be both true and false, a builtin over one (len(f(x)) as 3 and 4) and a
 result kept in a variable that nothing else touches before the assertions. A function
