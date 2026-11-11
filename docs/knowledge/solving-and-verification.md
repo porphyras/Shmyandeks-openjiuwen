@@ -27,7 +27,7 @@
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "196318d1523beb8ea3c18bcf7b5410b6024a1c1b2005ca29c0d361e5b8925b5a"
+      "sha256": "9842ba74b65e046d606a6e26a132f0bf523011fee60f448cd9062b10944a10b3"
     },
     {
       "id": "fast",
@@ -82,8 +82,9 @@ other proven defs and scalar constants never rebound; registries, globals, class
 attributes and closures disable the verdict. A test that writes through the module
 (mock.patch, setattr, m.A.b = ..., vars(m), reload) gives none. A method call obj.m() required
 to equal two values counts only when pure_methods proves m leaves its object unchanged
-(reads self, calls only safe builtins, pure modules, proven helpers of any source file or
-other such methods; no class with a base outside the sources). Skipped and xfail tests are
+(reads self and its data - values/keys/items, get with a key - calls only safe builtins,
+pure modules, proven helpers of any source file or other such methods; no class with a
+base outside the sources). Skipped and xfail tests are
 left out of every check. A data program's KeyError on a name from the question is retried
 once with the table columns before the task is called infeasible.[^solver][^context]
 

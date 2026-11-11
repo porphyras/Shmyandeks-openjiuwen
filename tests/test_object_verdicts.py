@@ -79,6 +79,29 @@ class ObjectVerdictTests(unittest.TestCase):
         src2 = "LAST = 0\ndef bump():\n    global LAST\n    LAST += 1\nclass S:\n    def get(self): return LAST\n"
         self.assertEqual(self.case(src2, "S", "S()", "get"), [])
 
+    def test_reads_of_own_data_are_pure(self):
+        cart = """
+        class Cart:
+            def __init__(self): self.items = {}
+            def add(self, name, qty, price): self.items[name] = (qty, price)
+            def item_count(self): return sum(q for q, _ in self.items.values())
+            def total(self): return sum(q * p for q, p in self.items.values())
+            def price(self, name): return self.items.get(name, (0, 0))[1]
+        """
+        self.assertEqual(len(self.case(cart, "Cart", "Cart()", "total", "o.add('a', 1, 1)")), 1)
+        self.assertEqual(ctx.pure_methods([textwrap.dedent(cart)]), {"item_count", "total", "price"})
+        q = """
+        import queue
+        class Box:
+            def __init__(self): self.q = queue.Queue()
+            def take(self): return self.q.get()
+            def take2(self):
+                q = self.q
+                return q.get(False)
+        """
+        self.assertEqual(self.case(q, "Box", "Box()", "take"), [])
+        self.assertEqual(self.case(q, "Box", "Box()", "take2"), [])
+
     def test_module_function_verdict_is_unchanged(self):
         src = "def clamp(x, lo, hi):\n    return max(lo, min(x, hi))\n"
         test = ("import unittest\nimport mylib as m\nclass T(unittest.TestCase):\n    def test_a(self):\n"

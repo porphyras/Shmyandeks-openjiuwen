@@ -1469,6 +1469,9 @@ _PURE_METHOD_NAMES = {"lower", "upper", "strip", "lstrip", "rstrip", "split", "r
 _PURE_CALL_MODULES = {"math", "cmath", "statistics", "string", "operator", "re", "json", "textwrap", "unicodedata",
                       "decimal", "fractions", "itertools", "functools", "copy"}
 _PLAIN_BASES = {"object", "ABC", "abc.ABC"}
+# Reads a pure method may make on its own data (self.items.values()); get only with a key
+# (queue.Queue.get() takes an item out).
+_READ_ON_SELF = {"values", "keys", "items", "copy", "count", "index", "get", "__len__", "__contains__"}
 
 
 def pure_methods(sources):
@@ -1551,13 +1554,19 @@ def pure_methods(sources):
                         return False
                 elif isinstance(f, ast.Attribute):
                     recv = f.value
+                    own = any(isinstance(x, ast.Name) and (x.id == "self" or x.id in alias) for x in ast.walk(recv))
                     if isinstance(recv, ast.Name) and recv.id == "self":
                         if f.attr not in ok_methods:
                             return False
                     elif isinstance(recv, ast.Name) and recv.id in _PURE_CALL_MODULES and recv.id not in local:
                         pass
-                    elif f.attr in _MUTATORS or f.attr not in _PURE_METHOD_NAMES or \
-                            any(isinstance(x, ast.Name) and x.id == "self" for x in ast.walk(recv)):
+                    elif f.attr in _MUTATORS or (f.attr in mdefs and f.attr not in ok_methods):
+                        return False  # a mutator, or a task method of that name not proven pure
+                    elif own:
+                        if f.attr not in _READ_ON_SELF or (f.attr == "get" and not (
+                                n.args and not (isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, bool)))):
+                            return False
+                    elif f.attr not in _PURE_METHOD_NAMES:
                         return False
                 else:
                     return False
