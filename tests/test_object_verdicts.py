@@ -2,10 +2,10 @@
 
 Run with: python3 -m unittest discover -s tests -v
 
-A method call obj.m() required to equal two values is a contradiction only when pure_methods
-proves m does not change its object (a deque queue, a list subclass or a seeded generator
-legitimately return different values); module functions keep their own proof. Skipped tests
-say nothing. A KeyError on a name from a data question gets one retry with the columns.
+m.f(<literals>) of the task's module required to equal two values is a contradiction when f
+is proven pure; a method call on an instance never gives this verdict (queues, iterators,
+defaultdict reads and dunder counters change state in ways the source analysis missed). Skipped
+tests say nothing. A KeyError on a name from a data question gets one retry with the columns.
 """
 import tempfile
 import textwrap
@@ -18,8 +18,7 @@ from harness.solver import Solver
 
 def verdicts(src, test):
     src, test = textwrap.dedent(src), textwrap.dedent(test)
-    impure = ctx.impure_functions([src]) | ctx.unproven_functions([src])
-    return ctx.test_contradictions(test, impure, ctx.pure_methods([src]))
+    return ctx.test_contradictions(test, ctx.impure_functions([src]) | ctx.unproven_functions([src]))
 
 
 TWO_CALLS = """
@@ -38,7 +37,7 @@ class ObjectVerdictTests(unittest.TestCase):
     def case(self, src, cls, make, meth, prep="pass"):
         return verdicts(src, TWO_CALLS.format(cls=cls, make=make, meth=meth, prep=prep))
 
-    def test_state_changing_methods_give_no_verdict(self):
+    def test_instance_methods_give_no_verdict(self):
         deque_queue = """
         from collections import deque
         class Queue:
@@ -56,53 +55,21 @@ class ObjectVerdictTests(unittest.TestCase):
             def roll(self): return self.rng.randint(1, 6)
         """
         self.assertEqual(self.case(dice, "Dice", "Dice(7)", "roll"), [])
-        counter = """
-        class C:
-            def __init__(self): self.n = 0
-            def tick(self):
-                self.n += 1
-                return self.n
+        it = """
+        class Reader:
+            def __init__(self, xs): self.it = iter(xs)
+            def peek_sum(self): return sum(self.it)
         """
-        self.assertEqual(self.case(counter, "C", "C()", "tick"), [])
-
-    def test_proven_pure_method_keeps_the_verdict(self):
-        src = """
-        def mean(xs):
-            return sum(xs) / len(xs)
-        class Sensor:
-            def __init__(self, xs): self.xs = list(xs)
-            def aggregate(self, values): return mean(values)
-            def summary(self): return self.aggregate([x for x in self.xs])
-        """
-        self.assertEqual(len(self.case(src, "Sensor", "Sensor([1])", "summary")), 1)
-        # a helper that reads a module name rebound elsewhere is not pure
-        src2 = "LAST = 0\ndef bump():\n    global LAST\n    LAST += 1\nclass S:\n    def get(self): return LAST\n"
-        self.assertEqual(self.case(src2, "S", "S()", "get"), [])
-
-    def test_reads_of_own_data_are_pure(self):
+        self.assertEqual(self.case(it, "Reader", "Reader([1, 2])", "peek_sum"), [])
+        # even a method that is pure: the verdict is left to the model
         cart = """
         class Cart:
             def __init__(self): self.items = {}
-            def add(self, name, qty, price): self.items[name] = (qty, price)
-            def item_count(self): return sum(q for q, _ in self.items.values())
             def total(self): return sum(q * p for q, p in self.items.values())
-            def price(self, name): return self.items.get(name, (0, 0))[1]
         """
-        self.assertEqual(len(self.case(cart, "Cart", "Cart()", "total", "o.add('a', 1, 1)")), 1)
-        self.assertEqual(ctx.pure_methods([textwrap.dedent(cart)]), {"item_count", "total", "price"})
-        q = """
-        import queue
-        class Box:
-            def __init__(self): self.q = queue.Queue()
-            def take(self): return self.q.get()
-            def take2(self):
-                q = self.q
-                return q.get(False)
-        """
-        self.assertEqual(self.case(q, "Box", "Box()", "take"), [])
-        self.assertEqual(self.case(q, "Box", "Box()", "take2"), [])
+        self.assertEqual(self.case(cart, "Cart", "Cart()", "total"), [])
 
-    def test_module_function_verdict_is_unchanged(self):
+    def test_module_function_verdict_is_kept(self):
         src = "def clamp(x, lo, hi):\n    return max(lo, min(x, hi))\n"
         test = ("import unittest\nimport mylib as m\nclass T(unittest.TestCase):\n    def test_a(self):\n"
                 "        self.assertEqual(m.clamp(15, 0, 10), 10)\n        self.assertEqual(m.clamp(15, 0, 10), 11)\n")

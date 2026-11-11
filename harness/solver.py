@@ -598,11 +598,9 @@ class Solver:
             return
         # "impure until proven otherwise": state the analysis cannot rule out disables a verdict
         impure = ctx.impure_functions(info["src_orig"].values()) | ctx.unproven_functions(info["src_orig"].values())
-        # methods proven not to change their object; none when sources beyond the parsed five exist
-        methods = ctx.pure_methods(info["src_orig"].values()) if len(srcs) <= 5 else set()
         for tp in tests:
             tsrc = ctx.read_text(tp, 1 << 20)
-            info["problems"] += ctx.test_contradictions(tsrc, impure, methods)
+            info["problems"] += ctx.test_contradictions(tsrc, impure)
             info["problems"] += ["test imports missing module %s" % m for m in ctx.missing_imports(tsrc, task.cwd)]
             info["problems"] += ctx.missing_fixtures(tsrc, os.path.dirname(tp), info["src_orig"].values())
         ok, out = self._run_tests(task, tests)

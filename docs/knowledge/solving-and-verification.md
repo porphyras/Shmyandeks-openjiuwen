@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "0017e038780d1305f64b179112f5004b67ccb27876a84f8a59fd18ffa4e14525"
+      "sha256": "c5efe84dff659d97f7ca708ecfacdc6af7484e0a8ed5f0ac2f07d7e82091e46c"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "9842ba74b65e046d606a6e26a132f0bf523011fee60f448cd9062b10944a10b3"
+      "sha256": "9f933d3e0066bb2aee7ae9cf479fd22701da03cb90d9e7a1966df0389d02bdf4"
     },
     {
       "id": "fast",
@@ -80,11 +80,10 @@ counts as pure only when proven so (unproven_functions): a plain module-level de
 decorators or mutable defaults that reads only its arguments, pure builtins and modules,
 other proven defs and scalar constants never rebound; registries, globals, class
 attributes and closures disable the verdict. A test that writes through the module
-(mock.patch, setattr, m.A.b = ..., vars(m), reload) gives none. A method call obj.m() required
-to equal two values counts only when pure_methods proves m leaves its object unchanged
-(reads self and its data - values/keys/items, get with a key - calls only safe builtins,
-pure modules, proven helpers of any source file or other such methods; no class with a
-base outside the sources). Skipped and xfail tests are
+(mock.patch, setattr, m.A.b = ..., vars(m), reload) gives none. The same call required to equal two
+values on an unchanged receiver counts only for the task module's functions (m.f, proven
+pure); methods of instances give no such verdict (state hides in iterators, defaultdict
+reads, dunder methods), so those tasks go to the model. Skipped and xfail tests are
 left out of every check. A data program's KeyError on a name from the question is retried
 once with the table columns before the task is called infeasible.[^solver][^context]
 

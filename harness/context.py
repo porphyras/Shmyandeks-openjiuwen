@@ -1258,10 +1258,9 @@ def _patches_module(tree, mods):
     return False
 
 
-def test_contradictions(src, impure=frozenset(), methods=frozenset()):
+def test_contradictions(src, impure=frozenset()):
     """Find assertions that no implementation can satisfy together: the same call required to
-    equal two different literals, or a property of a call contradicting its required value.
-    methods: pure_methods of the task's sources (instance calls obj.m() are judged only then)."""
+    equal two different literals, or a property of a call contradicting its required value."""
     try:
         tree = _drop_skipped(ast.parse(src))
     except SyntaxError:
@@ -1325,7 +1324,7 @@ def test_contradictions(src, impure=frozenset(), methods=frozenset()):
     # Different permutations are different inputs. A name such as maximum_profit,
     # total_distance or count_switches cannot prove that their results must match.
     problems += _self_contradictions(asserts, mods, funcs, impure)
-    problems += _object_contradictions(tree, impure, mods, methods)
+    problems += _object_contradictions(tree, impure, mods)
     if not known:
         return problems
     for n in asserts:
@@ -1455,133 +1454,6 @@ def _deterministic_expr(node, mods, funcs):
     return _has_call(node)
 
 
-# What a method proven not to change its object may call (pure_methods).
-_PURE_CALL_NAMES = {"len", "abs", "min", "max", "sum", "sorted", "round", "str", "int", "float", "bool", "list",
-                    "tuple", "set", "frozenset", "dict", "range", "enumerate", "zip", "any", "all", "isinstance",
-                    "issubclass", "reversed", "repr", "divmod", "pow", "map", "filter", "format", "chr", "ord",
-                    "type", "hasattr", "getattr", "callable"}
-_PURE_METHOD_NAMES = {"lower", "upper", "strip", "lstrip", "rstrip", "split", "rsplit", "join", "replace", "startswith",
-                      "endswith", "find", "rfind", "index", "count", "format", "title", "capitalize", "casefold",
-                      "isdigit", "isalpha", "isalnum", "isspace", "isupper", "islower", "isnumeric", "isdecimal", "zfill",
-                      "center", "ljust", "rjust", "partition", "rpartition", "splitlines", "encode", "decode", "get",
-                      "keys", "values", "items", "copy", "union", "intersection", "difference", "issubset",
-                      "issuperset", "isdisjoint", "symmetric_difference", "most_common", "is_integer", "conjugate"}
-_PURE_CALL_MODULES = {"math", "cmath", "statistics", "string", "operator", "re", "json", "textwrap", "unicodedata",
-                      "decimal", "fractions", "itertools", "functools", "copy"}
-_PLAIN_BASES = {"object", "ABC", "abc.ABC"}
-# Reads a pure method may make on its own data (self.items.values()); get only with a key
-# (queue.Queue.get() takes an item out).
-_READ_ON_SELF = {"values", "keys", "items", "copy", "count", "index", "get", "__len__", "__contains__"}
-
-
-def pure_methods(sources):
-    """Method names that provably do not change their object: every definition in the task's
-    classes only reads self (no store, no call on self's attributes), calls safe builtins,
-    pure modules, provably pure module-level functions of the sources or other such methods
-    (self.m()), reads no module name that is rebound anywhere, and no class derives from a base
-    outside the sources (a list/deque/dict subclass inherits mutating methods the analysis
-    cannot see). Functions are proven across all sources together (a helper imported from
-    another file counts), and one with mutation evidence (impure_functions) is excluded. Empty
-    when a source does not parse."""
-    trees = []
-    for src in sources:
-        try:
-            trees.append(ast.parse(src or ""))
-        except (SyntaxError, ValueError):
-            return set()
-    classes = [n for t in trees for n in ast.walk(t) if isinstance(n, ast.ClassDef)]
-    names = {c.name for c in classes}
-    for c in classes:
-        for b in c.bases:
-            base = ast.unparse(b)
-            if base not in names and base not in _PLAIN_BASES and not re.search(r"(Error|Exception|Warning)$", base):
-                return set()
-    # module names written anywhere (global/nonlocal, attribute or index store, bound twice)
-    rebound, bound = set(), collections.Counter()
-    for t in trees:
-        for n in t.body:
-            if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                for tg in (n.targets if isinstance(n, ast.Assign) else [n.target]):
-                    for x in ast.walk(tg):
-                        if isinstance(x, ast.Name):
-                            bound[x.id] += 1 if isinstance(n, ast.Assign) else 2
-        for x in ast.walk(t):
-            if isinstance(x, (ast.Global, ast.Nonlocal)):
-                rebound.update(x.names)
-            elif isinstance(x, (ast.Attribute, ast.Subscript)) and isinstance(x.ctx, (ast.Store, ast.Del)):
-                r = x
-                while isinstance(r, (ast.Attribute, ast.Subscript)):
-                    r = r.value
-                if isinstance(r, ast.Name) and r.id != "self":
-                    rebound.add(r.id)
-    rebound |= {k for k, v in bound.items() if v > 1}
-    fdefs = collections.defaultdict(list)
-    for t in trees:
-        for n in t.body:
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                fdefs[n.name].append(n)
-    mdefs = collections.defaultdict(list)
-    for c in classes:
-        for n in c.body:
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.args.args and n.args.args[0].arg == "self":
-                mdefs[n.name].append(n)
-
-    def pure(fn, ok_methods, ok_funcs):
-        if any(ast.unparse(d) not in ("property", "staticmethod", "classmethod") for d in fn.decorator_list):
-            return False
-        a = fn.args
-        local = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs} | \
-                {x.arg for x in (a.vararg, a.kwarg) if x is not None}
-        local |= {x.id for x in ast.walk(fn) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store)}
-        alias = {t.id for n in ast.walk(fn) if isinstance(n, ast.Assign)
-                 for t in n.targets if isinstance(t, ast.Name) and any(isinstance(x, ast.Name) and x.id == "self"
-                                                                         for x in ast.walk(n.value))}
-        for n in ast.walk(fn):
-            if isinstance(n, (ast.Global, ast.Nonlocal, ast.Yield, ast.YieldFrom, ast.Await, ast.Delete)):
-                return False
-            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in rebound and n.id not in local:
-                return False
-            if isinstance(n, (ast.Attribute, ast.Subscript)) and isinstance(n.ctx, (ast.Store, ast.Del)):
-                root = n
-                while isinstance(root, (ast.Attribute, ast.Subscript)):
-                    root = root.value
-                if isinstance(n, ast.Attribute) or not isinstance(root, ast.Name) or root.id == "self" or root.id in alias:
-                    return False
-            if isinstance(n, ast.Call):
-                f = n.func
-                if isinstance(f, ast.Name):
-                    if not (f.id in _PURE_CALL_NAMES or f.id in ok_funcs or re.search(r"(Error|Exception)$", f.id)):
-                        return False
-                elif isinstance(f, ast.Attribute):
-                    recv = f.value
-                    own = any(isinstance(x, ast.Name) and (x.id == "self" or x.id in alias) for x in ast.walk(recv))
-                    if isinstance(recv, ast.Name) and recv.id == "self":
-                        if f.attr not in ok_methods:
-                            return False
-                    elif isinstance(recv, ast.Name) and recv.id in _PURE_CALL_MODULES and recv.id not in local:
-                        pass
-                    elif f.attr in _MUTATORS or (f.attr in mdefs and f.attr not in ok_methods):
-                        return False  # a mutator, or a task method of that name not proven pure
-                    elif own:
-                        if f.attr not in _READ_ON_SELF or (f.attr == "get" and not (
-                                n.args and not (isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, bool)))):
-                            return False
-                    elif f.attr not in _PURE_METHOD_NAMES:
-                        return False
-                else:
-                    return False
-        return True
-
-    ok_m = {m for m in mdefs if m not in _MUTATORS}
-    ok_f = {f for f, d in fdefs.items() if len(d) == 1 and f not in impure_functions(sources)}
-    while True:  # the largest sets that are pure when what they call is
-        keep_m = {m for m in ok_m if all(pure(fn, ok_m, ok_f) for fn in mdefs[m])}
-        keep_f = {f for f in ok_f if pure(fdefs[f][0], set(), ok_f)}
-        if (keep_m, keep_f) == (ok_m, ok_f):
-            return ok_m
-        ok_m, ok_f = keep_m, keep_f
-
-
 _SKIP_MARKS = re.compile(r"(^|\.)(skip|skipIf|skipUnless|expectedFailure|xfail|skipif)\b")
 
 
@@ -1605,10 +1477,12 @@ def _drop_skipped(tree):
     return Drop().visit(tree)
 
 
-def _object_contradictions(tree, impure, mods=frozenset(), methods=frozenset()):
-    """In one test method: obj.m(<literals>) required to equal two different literals with
-    nothing touching obj in between. A module function (m.f) counts when it is not impure; a
-    method of an instance only when pure_methods proved that it does not change its object."""
+def _object_contradictions(tree, impure, mods=frozenset()):
+    """In one test method: m.f(<literals>) of the task's module (import mylib as m) required to
+    equal two different literals with nothing touching m in between, f not impure/unproven.
+    Methods of instances give no verdict: a queue, an iterator attribute, a defaultdict read,
+    __len__/__getattr__ with a counter... change state in ways a source analysis keeps missing,
+    and on a coding task a correct refusal only saves tokens while a false one loses the task."""
     out = []
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1622,7 +1496,7 @@ def _object_contradictions(tree, impure, mods=frozenset(), methods=frozenset()):
                 for c, l in ((a0, a1), (a1, a0)):
                     if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name) \
                             and _lit(l)[0] and _call_key(c) is not None and \
-                            (c.func.attr not in impure if c.func.value.id in mods else c.func.attr in methods):
+                            c.func.value.id in mods and c.func.attr not in impure:
                         call, lit = c, _lit(l)[1]
                         break
             if call is not None:
