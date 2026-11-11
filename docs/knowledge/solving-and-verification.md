@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "0938f9cadb57956dfaab3cd1459915e872f81c395e967ba711c73e0cb27c7139"
+      "sha256": "68ad3d75e5b80cdece529975ea96d65c870fb717eae16f5f20772b2ef1600e1e"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "07a87448dc2e99debe5bb22506eaa79342d52953f22fed9fe9eb889c13c68aff"
+      "sha256": "c8d58a36dd2c62cadc2660145b52f6df188b0bee427802a30e91b3a8e46f1e73"
     },
     {
       "id": "fast",
@@ -64,11 +64,13 @@ answer found verbatim in those paragraphs (or a number for a counting question)
 is accepted; otherwise the verdict stays infeasible.[^solver][^context]
 A test-success verdict controls DONE; it is not proof of hidden-test correctness.
 Inspect _run_tests_once when extending supported test styles.[^solver]
-It discovers unittest classes without a main entry point, plain test functions and
-pytest-style Test* classes (no TestCase base, no __init__; setup_class/setup_method/
-teardown_method), also when unittest.main() in the file would skip them; a test that
-needs a pytest fixture argument fails there and goes to the model, and an empty suite
-cannot establish success. A missing-file verdict needs a literal read (open, or
+A test file that needs pytest (imports it, takes fixture or parametrize arguments, or
+has a conftest.py beside it or at the task root) runs under the image's pytest from the
+task root; success needs a passed test, and failing names come from its FAILED lines.
+Other files run as scripts; the fallback runner discovers unittest classes without a
+main entry point, plain test functions and pytest-style Test* classes (no TestCase base,
+no __init__; setup_class/setup_method/teardown_method), also when unittest.main() in
+the file would skip them, and an empty suite cannot establish success. A missing-file verdict needs a literal read (open, or
 Path(...).read_text) with no earlier call in its test, setUp hook or module code that
 could create the file, a name absent from the sources and not passed to a call. Test contradictions do not infer
 permutation invariance from function names alone. They also catch a pure call

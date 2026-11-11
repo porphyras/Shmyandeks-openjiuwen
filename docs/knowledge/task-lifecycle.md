@@ -26,7 +26,7 @@
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "07a87448dc2e99debe5bb22506eaa79342d52953f22fed9fe9eb889c13c68aff"
+      "sha256": "c8d58a36dd2c62cadc2660145b52f6df188b0bee427802a30e91b3a8e46f1e73"
     },
     {
       "id": "flow",

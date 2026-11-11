@@ -192,6 +192,30 @@ sys.exit(0 if result.wasSuccessful() else 1)
 """
 
 
+def _uses_pytest(src, test_dir, root=None):
+    """A test file that needs pytest itself: it imports pytest (marks, fixtures, raises), has a
+    test function or method taking arguments (fixtures, parametrize) or a conftest.py beside it
+    or at the task root. Such files run under the image's pytest, not the fallback runner."""
+    if any(d and os.path.isfile(os.path.join(d, "conftest.py")) for d in (test_dir, root)):
+        return True
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return False
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import) and any(a.name.split(".")[0] in ("pytest", "_pytest") for a in n.names):
+            return True
+        if isinstance(n, ast.ImportFrom) and n.module and n.module.split(".")[0] in ("pytest", "_pytest"):
+            return True
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test"):
+            args = [a.arg for a in n.args.posonlyargs + n.args.args + n.args.kwonlyargs]
+            if args[:1] in (["self"], ["cls"]):
+                args = args[1:]
+            if args:
+                return True
+    return False
+
+
 def _has_plain_tests(src):
     """A test file with pytest-style tests (a top-level test function or a Test* class without a
     TestCase base): a script run with unittest.main() would skip them."""
@@ -515,10 +539,24 @@ class Solver:
                 ok = False
                 outs.append("(test time budget exhausted)")
                 break
+            src = ctx.read_text(tp, 1 << 20)
+            root = task.cwd if task is not None else os.path.dirname(tp)
+            if _uses_pytest(src, os.path.dirname(tp), root):
+                # From the task root, as `python -m pytest <file>` would be run there.
+                rc, out, err = sandbox.run([sandbox.PYTHON, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short",
+                                            "-rfE", os.path.relpath(tp, root)], root, timeout=min(30.0, left))
+                log = out + err
+                if rc == 0 and not re.search(r"\b\d+ passed\b", log):
+                    rc = 1  # nothing passed (all skipped or deselected): no evidence of success
+                    log += "\nNo runnable tests executed"
+                if rc != 0:
+                    ok = False
+                outs.append(log if rc is not None else log + "\n(timeout)")
+                continue
             rc, out, err = sandbox.run([sandbox.PYTHON, os.path.basename(tp)], os.path.dirname(tp),
                                        timeout=min(30.0, left))
             log = err + out
-            if rc == 0 and (not re.search(r"^Ran \d+ test", log, re.M) or _has_plain_tests(ctx.read_text(tp, 1 << 20))):
+            if rc == 0 and (not re.search(r"^Ran \d+ test", log, re.M) or _has_plain_tests(src)):
                 # Discover both unittest classes and plain functions; importing a class
                 # definition alone is not evidence that its tests passed.
                 left = t_end - time.time()

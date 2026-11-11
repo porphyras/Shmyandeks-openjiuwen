@@ -2,9 +2,10 @@
 
 Run with: python3 -m unittest discover -s tests -v
 
-The fallback runner also runs plain Test* classes (with setup_method) and the plain tests of a
-file whose unittest.main() skips them; a test needing a pytest fixture argument fails (the task
-goes to the model). A test reads a missing file only when nothing before the read could have
+A file that needs pytest (imports it, fixture or parametrize arguments, conftest.py) runs under
+the image's pytest; a run where nothing passed is not a success. Otherwise the fallback runner
+also runs plain Test* classes (with setup_method) and the plain tests of a file whose
+unittest.main() skips them. A test reads a missing file only when nothing before the read could have
 produced it.
 """
 import os
@@ -78,9 +79,34 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("No runnable tests", out)
 
-    def test_fixture_argument_goes_to_the_model(self):
-        ok, out = run_tests("def test_a(tmp_path):\n    assert tmp_path\n", FIXED)
+    def test_fixtures_and_parametrize_run_under_pytest(self):
+        src = """
+        import pytest
+        from stack import Stack
+
+        @pytest.mark.parametrize("xs,top", [([1, 2], 2), ([5], 5)])
+        def test_top(xs, top):
+            s = Stack()
+            for x in xs:
+                s.push(x)
+            assert s.pop() == top
+
+        def test_tmp(tmp_path):
+            (tmp_path / "a.txt").write_text("x")
+            assert Stack().is_empty()
+        """
+        self.assertTrue(run_tests(src, FIXED)[0])
+        ok, out = run_tests(src, BUGGY)
         self.assertFalse(ok)
+        self.assertEqual(ctx.failing_test_names(out), ["test_top"])
+
+    def test_all_skipped_is_not_a_pass(self):
+        src = "import pytest\n@pytest.mark.skip\ndef test_a():\n    assert False\n"
+        self.assertFalse(run_tests(src, FIXED)[0])
+
+    def test_failing_names_from_pytest_summary(self):
+        out = "FAILED test_m.py::TestStack::test_pop - assert 1 == 2\nERROR test_m.py::test_load - TypeError\n"
+        self.assertEqual(ctx.failing_test_names(out), ["test_pop", "test_load"])
 
 
 class MissingFixtureTests(unittest.TestCase):

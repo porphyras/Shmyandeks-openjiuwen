@@ -736,7 +736,9 @@ def compress_test_output(out, limit=1200):
 
 
 def failing_test_names(out):
-    return re.findall(r"^(?:FAIL|ERROR): (\w+)", out, re.M)
+    """unittest's "FAIL: test_x (...)" and pytest's "FAILED file.py::Class::test_x[case] - ..."."""
+    return re.findall(r"^(?:FAIL|ERROR): (\w+)", out, re.M) + \
+        re.findall(r"^(?:FAILED|ERROR) \S*?::(?:\w+::)*(\w+)", out, re.M)
 
 
 def extract_functions(src, names):
