@@ -534,13 +534,12 @@ participants, in the official participants' chat and at the meeting with the exp
 2. The same chat, Dmitry Kolodezev, 10 November 2026, 22:08:
    «все, чему нужен GPU считаем для простоты нейросетевыми моделями» - "for simplicity, we count
    anything that needs a GPU as a neural-network model."
-3. Meeting with the experts, 9 November 2026 (recording, about 37:12-39:40):
-   «изначально было условие, что нейросети совсем нельзя, а потом сказали, что можно… можно
-   что-то небольшое, что вы сможете утоптать в контейнер, то, пожалуйста, используйте» - "at
-   first the condition was no neural networks at all, then they said it is allowed... something
-   small that you can pack into the container - please use it"; and «всё, что не является
-   откровенно вредоносным… нас устраивает» - "anything that is not openly malicious... is fine
-   with us."
+3. Meeting with the experts, 9 November 2026 (recording; automatic transcript, about
+   38:28-39:21), the expert's answer to a participant asking whether small neural networks are
+   allowed: «всё, что не является откровенно вредоносным… нас устраивает» - "anything that is
+   not openly malicious... is fine with us"; «Не, можно, можно что-то небольшое, что вы сможете
+   утоптать в контейнер, то, пожалуйста, используйте» - "Yes, it is allowed: something small
+   that you can pack into the container - please use it."
 
 The harness uses exactly such a model: bge-small-en-v1.5 (33M parameters, MIT), int8, CPU only
 (onnxruntime), no network, shipped in `models/`. It runs only in the last step of a search,
