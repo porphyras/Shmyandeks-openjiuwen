@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "c5efe84dff659d97f7ca708ecfacdc6af7484e0a8ed5f0ac2f07d7e82091e46c"
+      "sha256": "0eeffb00697781051ceab8d76c1debaee34f54ff8406e59c92578f05baafcf3e"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "9f933d3e0066bb2aee7ae9cf479fd22701da03cb90d9e7a1966df0389d02bdf4"
+      "sha256": "4955ac6887479389a22cfac2f1cef472f4c02d10487d5fa407b162aad67b723e"
     },
     {
       "id": "fast",
@@ -56,6 +56,8 @@ call; the required information may already be available locally.[^context]
 | coding | changed function definitions | merge into sources and run discovered tests |
 
 The exact prompts, reply parsing, retries and exceptions live in Solver.
+After a first NOT FOUND any different excerpt (even a shorter one) gets the second look;
+heading-only paragraphs are dropped from passages, a heading with its facts below stays.
 A search that ends in NOT FOUND after every look gets one targeted look
 (HARNESS_ENTITY_LOOK, on by default): entity_passages gathers the paragraphs
 about the names the last reply reached, in any written form ("J. Muller"), with

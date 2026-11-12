@@ -785,9 +785,9 @@ class Solver:
                     code = model_code
                     continue
                 return Outcome("infeasible", note="column %r named by the task is not in the data" % km.group(1))
-            if rc and "ZeroDivisionError" in err and (not data or attempt) and not self.careful:
-                # A well-posed task never divides by zero (split into 0 parts); on data a first
-                # division by zero may be the program's own filter bug, so it gets one retry.
+            if rc and "ZeroDivisionError" in err and attempt and not self.careful:
+                # A well-posed task never divides by zero (split into 0 parts), but a first division
+                # by zero may be the program's own bug (a filter, an off-by-one), so it gets one retry.
                 return Outcome("infeasible", note="division by zero")
             tail = [l for l in (err or "").strip().splitlines() if l.strip()][-4:]
             last_err = ("Program timed out." if rc is None else
@@ -846,7 +846,7 @@ class Solver:
             if attempt == 0:
                 # Second look: the whole base when small, else a wider excerpt.
                 corpus_all = ctx.kb_fallback_text(task, hint=reply if not info.get("kb_cards", True) else "")
-                if len(corpus_all) > len(excerpt) + 10:
+                if corpus_all and corpus_all != excerpt:  # new text, even if shorter than the first
                     excerpt = corpus_all
                     continue
             if unfinished and chain_retry is False and mt < 260:

@@ -431,8 +431,8 @@ def _passages(docs, max_len=900):
         title = _title(rel, text)
         for para in re.split(r"\n\s*\n", text):
             para = para.strip()
-            if not para or para.startswith("#") and len(para) < 120:
-                continue
+            if not para or para.startswith("#") and "\n" not in para and len(para) < 120:
+                continue  # a bare heading line; "# Alice\nBorn: 1980" is a card and stays
             for k in range(0, len(para), max_len):
                 out.append((title, para[k:k + max_len]))
     return out
@@ -546,7 +546,7 @@ def entity_passages(docs, instr, names, limit=8000):
     by_doc = []
     for rel, text in docs:
         paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-        paras = [p for p in paras if not (p.startswith("#") and len(p) < 120)]
+        paras = [p for p in paras if not (p.startswith("#") and "\n" not in p and len(p) < 120)]
         by_doc.append((rel, _title(rel, text), paras))
     q = [w for w in _norm(instr).split() if w not in _STOP and len(w) > 2]
     for w in list(q):
