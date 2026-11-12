@@ -30,7 +30,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt \
+# pip retries a connection but not a download cut mid-stream (pip 25.0 of the base image), so
+# the whole install is repeated up to 5 times; the download cache is on for it (finished wheels
+# are not fetched again) and removed in the same layer.
+RUN unset PIP_NO_CACHE_DIR; \
+    for i in 1 2 3 4 5; do \
+        pip install -r /app/requirements.txt && break; \
+        if [ "$i" = 5 ]; then exit 1; fi; \
+        echo "pip install failed (attempt $i), retrying" >&2; sleep 10; \
+    done \
     && cd /tmp && python -c "import openjiuwen, onnxruntime, tokenizers" && rm -rf /tmp/* /root/.cache
 
 COPY run_agent.py /app/run_agent.py

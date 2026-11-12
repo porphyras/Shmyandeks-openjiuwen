@@ -21,7 +21,7 @@
     {
       "id": "docker",
       "resource": "../../Dockerfile",
-      "sha256": "5e232e637663a47d95ca9b350bfef7b01379d67fa5a0dee4a8257673ce2dbca3"
+      "sha256": "a17039365822c69a8954e1e55051e8e4f3eb7fd105ff7c7814496f5aa9b2b98d"
     },
     {
       "id": "ignore",
@@ -58,8 +58,10 @@
 ---
 # Execution environment and SDK boundary
 
-Dockerfile owns the image and installation (pip retries 10 times with a 100 s timeout:
-the organisers build the image, and a network hiccup must not fail the build); its ENV turns off model-hub downloads
+Dockerfile owns the image and installation (pip retries a connection 10 times with a 100 s timeout,
+and the whole pip install is repeated up to 5 times with its download cache on, since pip 25.0
+does not retry a download cut mid-stream: the organisers build the image, and a network hiccup
+must not fail the build); its ENV turns off model-hub downloads
 and telemetry exporters of SDK paths the harness never calls (HF_*_OFFLINE, OTEL_*)
 and keeps BLAS/OpenMP to one thread and the tokenizers (rayon) pool to two (the
 container sees the host's CPU count, not the --cpus quota, and threads count against
