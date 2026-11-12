@@ -21,7 +21,7 @@
     {
       "id": "docker",
       "resource": "../../Dockerfile",
-      "sha256": "4d73d5a79ee2cd18a29aaaf0a4c4979416c3e404747f87b755ab41b4ae04e5fb"
+      "sha256": "be88f3ad30c4fd0eff06fc884c48e0ef76e02b66bc471045b7a35d6b6a0c6ac8"
     },
     {
       "id": "ignore",
@@ -60,8 +60,9 @@
 
 Dockerfile owns the image and installation; its ENV turns off model-hub downloads
 and telemetry exporters of SDK paths the harness never calls (HF_*_OFFLINE, OTEL_*)
-and keeps BLAS/OpenMP to one thread (the container sees the host's CPU count, not
-the --cpus quota).
+and keeps BLAS/OpenMP to one thread and the tokenizers (rayon) pool to two (the
+container sees the host's CPU count, not the --cpus quota, and threads count against
+--pids-limit).
 While no model call has succeeded, a line on stderr each minute says the run is
 waiting for the proxy (the policy is to wait, not to quit). requirements.in names direct packages,
 and requirements.txt locks the resolved graph. Consult the files for versions.
