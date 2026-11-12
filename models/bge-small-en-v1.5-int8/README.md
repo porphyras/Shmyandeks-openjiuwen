@@ -19,9 +19,10 @@ downloaded at build or run time.
 | model_int8.onnx (unpacked in memory) | 33492250 | 04259da8eebcac24be59fa6f3c2c0ce7e38729259b1ed03928b7fb55517a333f |
 | tokenizer.json | 711396 | d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66 |
 
-The graph is stored gzip-compressed (`gzip.compress(data, 6, mtime=0)`): random bytes of the raw
-int8 weights happen to contain sequences shaped like cloud access keys, which secret scanners
-would flag; the compressed file has none, and is smaller. `harness/embed.py` checks the hashes
+The graph is stored gzip-compressed (`gzip.compress(data, 6, mtime=0)`): random bytes of int8
+weights produce false positives in secret scanners; the compressed file has none, is smaller,
+and its decompressed graph is verified by sha256. Why a small local model is allowed at all:
+the section "Why a small local embedding model is allowed" of the main README. `harness/embed.py` checks the hashes
 of both files, unpacks the graph in memory, checks its hash and hands the bytes to onnxruntime;
 a mismatch, a missing file or a missing package turns the look off for the run (the search then
 ends as it did without it).

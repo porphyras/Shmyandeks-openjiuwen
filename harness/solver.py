@@ -29,7 +29,7 @@ PROSE_ESCALATE = os.environ.get("HARNESS_PROSE_ESCALATE", "0") == "1"
 DATA_EXPR = os.environ.get("HARNESS_DATA_EXPR", "1") == "1"
 CODING_TESTSRC = os.environ.get("HARNESS_CODING_TESTSRC", "0") == "1"
 
-CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S)
+CODE_RE = re.compile(r"```(?:python3?|py)?[ \t]*\n(.*?)```", re.S | re.I)
 
 
 # Expressions often use np.floor / math.floor without importing them.
@@ -252,7 +252,7 @@ def extract_code(text):
     t = (text or "").strip()
     if t.startswith("```"):
         t = t.strip("`")
-        t = re.sub(r"^(python3?|py)\s*\n", "", t)
+        t = re.sub(r"^(python3?|py)\s*\n", "", t, flags=re.I)
         return t.strip()
     if re.search(r"^(import |from |def |print\(|with open|[a-z_]\w* = )", t, re.M):
         return t
@@ -546,10 +546,14 @@ class Solver:
                 break
             src = ctx.read_text(tp, 1 << 20)
             root = task.cwd if task is not None else os.path.dirname(tp)
+            # Tests under tests/ import the module at the task root (or under src/): run from the
+            # test's folder, they need the root on the path, as a checker run from the root has.
+            pp = {"PYTHONPATH": os.pathsep.join([root] + [os.path.join(root, "src")] * os.path.isdir(os.path.join(root, "src")))}
             if _uses_pytest(src, os.path.dirname(tp), root):
                 # From the task root, as `python -m pytest <file>` would be run there.
                 rc, out, err = sandbox.run([sandbox.PYTHON, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short",
-                                            "-rfE", os.path.relpath(tp, root)], root, timeout=min(30.0, left))
+                                            "-rfE", os.path.relpath(tp, root)], root, timeout=min(30.0, left),
+                                           extra_env=pp)
                 log = out + err
                 if rc == 0 and not re.search(r"\b\d+ passed\b", log):
                     rc = 1  # nothing passed (all skipped or deselected): no evidence of success
@@ -559,7 +563,7 @@ class Solver:
                 outs.append(log if rc is not None else log + "\n(timeout)")
                 continue
             rc, out, err = sandbox.run([sandbox.PYTHON, os.path.basename(tp)], os.path.dirname(tp),
-                                       timeout=min(30.0, left))
+                                       timeout=min(30.0, left), extra_env=pp)
             log = err + out
             if rc == 0 and (not re.search(r"^Ran \d+ test", log, re.M) or _has_plain_tests(src)):
                 # Discover both unittest classes and plain functions; importing a class
@@ -571,8 +575,10 @@ class Solver:
                     break
                 rc, out2, err2 = sandbox.run(
                     [sandbox.PYTHON, "-c", _DISCOVER_TESTS, os.path.splitext(os.path.basename(tp))[0]],
-                    os.path.dirname(tp), timeout=min(30.0, left))
+                    os.path.dirname(tp), timeout=min(30.0, left), extra_env=pp)
                 log = err2 + out2
+            if rc == 0 and re.search(r"^(FAILED \(|FAIL: |ERROR: )", log, re.M):
+                rc = 1  # unittest.main(exit=False) or a bare runner: exit 0 with failing tests
             if rc == 0 and not any(int(n) > 0 for n in re.findall(r"^Ran (\d+) test", log, re.M)):
                 ok = False
                 log += "\nNo runnable tests executed"
@@ -1098,14 +1104,23 @@ def _names_missing_column(name, instr, info):
 
 
 def _raw_answer(reply):
-    m = re.search(r"ANSWER:\s*(.+)", reply or "")
+    """The value after "ANSWER:" (also "**ANSWER:** x", "ANSWER: **x**"; else the last line
+    starting "Answer: x" in any case, outside code blocks), without paired emphasis or quotes."""
+    reply = reply or ""
+    m = re.search(r"\**ANSWER\**\s*:\s*\**[ \t]*(.+)", reply)
+    if not m:  # "Answer: x" on a line of its own, outside code (not "# answer: 120" in a program)
+        prose = re.sub(r"```.*?(?:```|$)", "", reply, flags=re.S)
+        ms = list(re.finditer(r"(?im)^[ \t]*\**answer\**\s*:\s*\**[ \t]*(.+)", prose))
+        m = ms[-1] if ms else None
     text = m.group(1).splitlines()[0] if m else ""
     if not m:
-        lines = [l for l in (reply or "").strip().splitlines() if l.strip()]
+        lines = [l for l in reply.strip().splitlines() if l.strip()]
         text = lines[0] if len(lines) == 1 and len(lines[0]) < 80 else ""
     text = text.strip().strip("`").strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"*":
+    while len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"*_`":
         text = text[1:-1].strip()
+    if text.endswith("**") and "*" not in text[:-2]:
+        text = text[:-2].strip()  # "**ANSWER: Osaka**"
     return text
 
 

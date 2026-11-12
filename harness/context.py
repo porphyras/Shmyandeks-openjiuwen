@@ -817,6 +817,8 @@ def _ev(n, known):
         if not (isinstance(n.func, ast.Name) and n.func.id in _SAFE_FUNCS) or n.keywords:
             raise _NoEval()
         args = [_small(_ev(a, known)) for a in n.args]
+        if n.func.id == "str" and any(isinstance(a, (int, float, complex)) for a in args):
+            raise _NoEval()  # a required 4 may be returned as 4.0: str() of it is unknown
         return _small(_SAFE_FUNCS[n.func.id](*args))
     if isinstance(n, ast.Constant):
         return _small(n.value)
@@ -1354,6 +1356,9 @@ def test_contradictions(src, impure=frozenset()):
         elif attr in ("assertIsInstance", "assertNotIsInstance") and len(n.args) >= 2:
             ok, v = _eval_subst(n.args[0], known)
             types = _type_tuple(n.args[1])
+            numeric = (int, float, complex)
+            if ok and types and isinstance(v, numeric) and any(issubclass(t, numeric) for t in types):
+                continue  # 4 == 4.0 == True-ish: an equal value does not fix a numeric type
             if ok and types and (isinstance(v, types) != (attr == "assertIsInstance")):
                 problems.append("%s contradicts required values" % ast.unparse(n)[:120])
         elif attr in ("assertTrue", "assertFalse") and n.args:

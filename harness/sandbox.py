@@ -84,11 +84,12 @@ def _read_head(f):
             + f.read(half).decode("utf-8", "replace"))
 
 
-def run(argv, cwd, timeout=20):
-    """Run argv in cwd (a task directory) in its own process session, with the clean SAFE_ENV,
-    memory/file-size limits, a timeout and output captured to capped temp files.
-    Returns (returncode, stdout, stderr); returncode None on timeout."""
+def run(argv, cwd, timeout=20, extra_env=None):
+    """Run argv in cwd (a task directory) in its own process session, with the clean SAFE_ENV
+    (plus `extra_env`, e.g. PYTHONPATH for tests), memory/file-size limits, a timeout and output
+    captured to capped temp files. Returns (returncode, stdout, stderr); returncode None on timeout."""
     env = dict(SAFE_ENV)
+    env.update(extra_env or {})
     if not os.path.isdir("/usr/local/bin"):
         env["PATH"] = os.environ.get("PATH", env["PATH"])
     try:

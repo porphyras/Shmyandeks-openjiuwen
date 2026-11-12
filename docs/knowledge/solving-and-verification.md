@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "99661baed576ecc44bd21d97fcf39e2197f1c3116d3f3de6474c20af555f63dc"
+      "sha256": "317d7bf0c2fb5d468a52164249fe595da6db952240ade3135b3d3e9be9469ad6"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "4955ac6887479389a22cfac2f1cef472f4c02d10487d5fa407b162aad67b723e"
+      "sha256": "2368498c1181d3397ed332352ffe759de6876b3eedc0bd6c0422f1e9f202c247"
     },
     {
       "id": "fast",
@@ -72,6 +72,11 @@ Inspect _run_tests_once when extending supported test styles.[^solver]
 A test file that needs pytest (imports it, takes fixture or parametrize arguments, or
 has a conftest.py beside it or at the task root) runs under the image's pytest from the
 task root; success needs a passed test, and failing names come from its FAILED lines.
+Tests run with the task root (and src/) on PYTHONPATH, so tests/ files import the module at
+the root; a run that exits 0 but prints "FAILED (" or "FAIL:"/"ERROR:" lines (unittest.main(exit=False))
+is a failure; a required numeric value does not fix its type (assertIsInstance(f(x), float) with
+f(x) == 4 gives no verdict, nor does str() of it); ANSWER lines are read through markdown
+emphasis and other casing, and a ```Python block is code.
 Other files run as scripts; the fallback runner discovers unittest classes without a
 main entry point, plain test functions and pytest-style Test* classes (no TestCase base,
 no __init__; setup_class/setup_method/teardown_method), also when unittest.main() in
