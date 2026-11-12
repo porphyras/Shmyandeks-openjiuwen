@@ -3,4 +3,5 @@
 !requirements.txt
 !run_agent.py
 !harness/
+!models/
 harness/__pycache__

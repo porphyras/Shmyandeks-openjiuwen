@@ -27,10 +27,11 @@ WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt \
-    && cd /tmp && python -c "import openjiuwen" && rm -rf /tmp/* /root/.cache
+    && cd /tmp && python -c "import openjiuwen, onnxruntime, tokenizers" && rm -rf /tmp/* /root/.cache
 
 COPY run_agent.py /app/run_agent.py
 COPY harness /app/harness
+COPY models /app/models
 RUN python -m compileall -q /app/harness /app/run_agent.py
 
 ENTRYPOINT ["python", "/app/run_agent.py"]

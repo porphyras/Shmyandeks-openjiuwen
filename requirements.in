@@ -1,3 +1,5 @@
 openjiuwen==0.1.20
 # shipped so that task test files importing pytest can run
 pytest==8.4.2
+# the last-resort search look runs a small int8 embedding model (models/, harness/embed.py)
+onnxruntime==1.31.1

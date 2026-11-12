@@ -22,7 +22,7 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "0eeffb00697781051ceab8d76c1debaee34f54ff8406e59c92578f05baafcf3e"
+      "sha256": "99661baed576ecc44bd21d97fcf39e2197f1c3116d3f3de6474c20af555f63dc"
     },
     {
       "id": "context",
@@ -57,6 +57,9 @@ call; the required information may already be available locally.[^context]
 
 The exact prompts, reply parsing, retries and exceptions live in Solver.
 After a first NOT FOUND any different excerpt (even a shorter one) gets the second look;
+when every look at a large prose base ends in NOT FOUND with no guess, the documents not shown
+yet, ranked by the int8 bge-small embedding model (harness/embed.py), get one last look
+(HARNESS_EMBED_FALLBACK, on by default; any model failure turns it off for the run);
 heading-only paragraphs are dropped from passages, a heading with its facts below stays.
 A search that ends in NOT FOUND after every look gets one targeted look
 (HARNESS_ENTITY_LOOK, on by default): entity_passages gathers the paragraphs

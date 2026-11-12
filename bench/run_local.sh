@@ -13,6 +13,8 @@ cp -R "$SET/tasks" "$RUN/tasks"
 if [ -z "${ENTRY:-}" ]; then
   cp "$ROOT/run_agent.py" "$RUN/code/" && cp -R "$ROOT/harness" "$RUN/code/harness"
   rm -rf "$RUN/code/harness/__pycache__"
+  # the embedding model of the last search look (read-only, so a link is enough)
+  [ -d "$ROOT/models" ] && ln -s "$ROOT/models" "$RUN/code/models"
   (cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null; git -C "$ROOT" diff --stat 2>/dev/null | tail -1) > "$RUN/code/VERSION" || true
   ENTRY="$RUN/code/run_agent.py"
 fi

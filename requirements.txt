@@ -126,6 +126,8 @@ filelock==3.32.7
     # via
     #   huggingface-hub
     #   openjiuwen
+flatbuffers==25.12.19
+    # via onnxruntime
 fonttools==4.68.0
     # via matplotlib
 frozenlist==1.8.0
@@ -260,11 +262,14 @@ numpy==2.5.4
     # via
     #   contourpy
     #   matplotlib
+    #   onnxruntime
     #   openjiuwen
     #   pandas
     #   transformers
 oauthlib==4.0.1
     # via openjiuwen
+onnxruntime==1.31.1
+    # via -r requirements.in
 openai==3.46.0
     # via openjiuwen
 openapi-pydantic==0.6.0
@@ -330,6 +335,7 @@ packaging==26.3
     #   fastmcp-slim
     #   huggingface-hub
     #   matplotlib
+    #   onnxruntime
     #   opentelemetry-instrumentation
     #   pytest
     #   transformers
@@ -356,7 +362,9 @@ propcache==0.5.4
     #   aiohttp
     #   yarl
 protobuf==7.36.2
-    # via pymilvus
+    # via
+    #   onnxruntime
+    #   pymilvus
 py-key-value-aio==0.4.6
     # via fastmcp-slim
 pycparser==3.12

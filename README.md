@@ -178,7 +178,12 @@ is counted in tokens.
      multi-hop question), up to 9k characters; the model answers with a short chain of facts;
      when it ends with "not found", the next look is picked with the names its reply reached,
      and on a third look the own articles of those entities come first (the chain usually
-     stops one hop short: "... mentored by X; X's employer is not in the text");
+     stops one hop short: "... mentored by X; X's employer is not in the text"); when every
+     look ends in "not found" with no guess, the documents not shown yet are ranked by a small
+     embedding model (bge-small-en-v1.5, int8 ONNX in `models/`, MIT, sha256 checked before
+     loading - see `models/bge-small-en-v1.5-int8/README.md`; onnxruntime, no network) and the
+     closest ones get one last look - a fact worded unlike the question escapes BM25
+     (`HARNESS_EMBED_FALLBACK=0` turns it off);
    - code: the tests are run first; the model sees the source, the failing tests and a
      compressed test log.
 2. **One short call** to a no-reasoning model with a tiny prompt; the model returns an
@@ -226,6 +231,34 @@ is counted in tokens.
 Small sets (up to 10 tasks — the qualification run has 2 feasible tasks) are solved "for
 sure": no free infeasibility verdicts, refusals are retried and escalated, and every
 answer without a free check gets an independent second opinion.
+
+### Last-resort embedding look (search)
+
+**What.** A search over a large prose base (more than 14k characters, not cards) normally gets
+BM25 excerpts, a second look and a look at the paragraphs about the entities the replies named.
+When all of them end in `NOT FOUND` and the model offered no guess, the documents none of whose
+paragraphs were shown yet are ranked by a small sentence-embedding model and the closest ones
+(up to ~6k characters) get one more call. The answer is taken only if it appears verbatim in
+those documents (or is a number for a counting question), as for the entity look.
+
+**Why.** BM25 needs shared words. A question that describes its subject without naming it
+("a foot-operated weaving frame from the 1100s" for "a twelfth-century treadle loom") finds
+nothing, and the task ends as a refusal that earns no points.
+
+**Measured** (real proxy, full budget):
+
+| set | without | with |
+|---|---|---|
+| paraphrase questions, prose base of 105 files, 13 tasks, 2 runs | 8/13 and 8/13, 14.7k and 16.7k units | 12/13 and 12/13, 8.8k and 10.0k units |
+| r01 (36), v2_search (15), prose8 (8), 52 prose tasks of the red set | same points | same points; +13-18 % units on prose search where every look ended in NOT FOUND |
+
+**Model.** bge-small-en-v1.5 (MIT), int8 ONNX, 33.5 MB, in `models/bge-small-en-v1.5-int8`
+with its licence, provenance and sha256 (`README.md` there). onnxruntime and tokenizers run it
+on 2 threads; about 0.7 s per look on a laptop core. Nothing is downloaded at build or run time.
+The hashes are checked before loading; a missing package or file, a wrong hash or a runtime
+error turns the look off for the run, and the search ends as it did before.
+
+**Off switch.** `HARNESS_EMBED_FALLBACK=0`.
 
 ## Token accounting and task selection
 

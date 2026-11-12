@@ -26,7 +26,7 @@
     {
       "id": "local",
       "resource": "../../bench/run_local.sh",
-      "sha256": "a8224368cdf9de3915eb7409c96c95f284ec49ee3226f1494d172030915eab70"
+      "sha256": "82e30e61b3fc4c146e994cd4c670388d5b23323bc058b8a6f83ad2cc11c9a4ac"
     },
     {
       "id": "judge",
@@ -64,7 +64,7 @@ bench/README_sets.md owns generator commands, set layout, keys, hidden tests and
 grading semantics. Keep answer keys outside the task inputs and submission image.
 A generated-set score is a regression result, not a hidden-competition forecast.[^sets]
 
-run_local.sh copies a set and code into a named bench/runs directory, starts a
+run_local.sh copies a set and code (with a link to models/) into a named bench/runs directory, starts a
 stub and optionally forwards to the real proxy. It replaces the named run directory:
 use a new run name when preserving evidence. Forward mode reads credentials from
 an external local file; inspect the script rather than copying secrets into docs.[^local]

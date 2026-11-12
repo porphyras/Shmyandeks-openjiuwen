@@ -21,12 +21,12 @@
     {
       "id": "docker",
       "resource": "../../Dockerfile",
-      "sha256": "e7cde5a2eecadb8f7cfb98d7baa698ed462e9bd70dae61ea0fff3da67ac23672"
+      "sha256": "4d73d5a79ee2cd18a29aaaf0a4c4979416c3e404747f87b755ab41b4ae04e5fb"
     },
     {
       "id": "ignore",
       "resource": "../../.dockerignore",
-      "sha256": "45b1a1f1b7120eec8f94d09b5491dc93f9df37f5726e97f8932dfea1c3ed9ba5"
+      "sha256": "eeb5babe28f41d8a66498b97d0c7596960c839d0993b29494500b14c7750b072"
     },
     {
       "id": "sandbox",
@@ -46,12 +46,12 @@
     {
       "id": "deps",
       "resource": "../../requirements.in",
-      "sha256": "b54616535bfe397a3793ccbe30c8d5c531932fca6b53bb86e73911e83b16066c"
+      "sha256": "9da3bdf4266dd037d91afedc94412e90f1f4d0a4ad31d525fbfcb94517cf1888"
     },
     {
       "id": "lock",
       "resource": "../../requirements.txt",
-      "sha256": "9efa603ad9ad2f71fc5d7ceec7fb804850086f34fe65ff7b4b15e87378e57406"
+      "sha256": "203738e2d461bbc9077ed4c1d42dcec2ce9f8e0d11ef1b9b0ad1df2b6df1d4ce"
     }
   ]
 }
@@ -65,7 +65,8 @@ the --cpus quota).
 While no model call has succeeded, a line on stderr each minute says the run is
 waiting for the proxy (the policy is to wait, not to quit). requirements.in names direct packages,
 and requirements.txt locks the resolved graph. Consult the files for versions.
-Only run_agent.py, harness/ and build dependencies are copied into the image;
+Only run_agent.py, harness/, models/ (the int8 embedding model of the last search look,
+sha256-checked by harness/embed.py before loading) and build dependencies are copied into the image;
 .dockerignore excludes developer docs, skills, tools, tests and bench artifacts.[^docker][^ignore][^deps][^lock]
 
 The harness reads the mounted task directory and optional output/budget arguments.
