@@ -521,6 +521,34 @@ Cost per task over all six sets above (one run each), by kind:
 | search | yes | 87 | 195 | 88 | 387 | 1.11 |
 | search | no | 30 | 227 | 130 | 520 | 1.47 |
 
+## Why a small local embedding model is allowed
+
+The rules say local neural-network models are not allowed. The experts narrowed this down for
+participants, in the official participants' chat and at the meeting with the experts:
+
+1. Participants' chat, expert Dmitry Kolodezev, 8 November 2026, 18:27 (answering a question
+   about neural-network predictors):
+   «У вас не будет gpu и будет ограничено по памяти процессорам и времени. Если в эти рамки вы
+   умудритесь запихать нейронку - пожалуйста» - "You will have no GPU, and memory, CPU and time
+   will be limited. If you manage to fit a neural network within those limits - go ahead."
+2. The same chat, Dmitry Kolodezev, 10 November 2026, 22:08:
+   «все, чему нужен GPU считаем для простоты нейросетевыми моделями» - "for simplicity, we count
+   anything that needs a GPU as a neural-network model."
+3. Meeting with the experts, 9 November 2026 (recording, about 37:12-39:40):
+   «изначально было условие, что нейросети совсем нельзя, а потом сказали, что можно… можно
+   что-то небольшое, что вы сможете утоптать в контейнер, то, пожалуйста, используйте» - "at
+   first the condition was no neural networks at all, then they said it is allowed... something
+   small that you can pack into the container - please use it"; and «всё, что не является
+   откровенно вредоносным… нас устраивает» - "anything that is not openly malicious... is fine
+   with us."
+
+The harness uses exactly such a model: bge-small-en-v1.5 (33M parameters, MIT), int8, CPU only
+(onnxruntime), no network, shipped in `models/`. It runs only in the last step of a search,
+after every look ended in NOT FOUND (see "Last-resort embedding look" above), and
+`HARNESS_EMBED_FALLBACK=0` turns it off. The weights are stored gzip-compressed because random
+bytes of the raw int8 weights match the pattern of cloud access keys and would trip secret
+scanners; the hashes are in `models/bge-small-en-v1.5-int8/README.md`.
+
 ## What the organisers clarified (stream of 9 November)
 
 - The tasks of the final run are new and differ from the examples, and there are more of them
