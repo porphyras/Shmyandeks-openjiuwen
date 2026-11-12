@@ -22,17 +22,17 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "317d7bf0c2fb5d468a52164249fe595da6db952240ade3135b3d3e9be9469ad6"
+      "sha256": "cf071df1e333ca985423abc663951c94c10784b7b6a74929b5fc4cab20f11bcf"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "2368498c1181d3397ed332352ffe759de6876b3eedc0bd6c0422f1e9f202c247"
+      "sha256": "fd1a98f43ed1aa0a3562e736b8f547140ad88c25d4febf3422ec98c01c31bf04"
     },
     {
       "id": "fast",
       "resource": "../../harness/fastpath.py",
-      "sha256": "2d66eddd426ece64701b00de6e690ff8da50c4938201733c3088768bb452ec7e"
+      "sha256": "73be20f0e8e8eefd2530eb752bdeb77d2459c92e8e0fe63aabdbc994a5ca13a9"
     },
     {
       "id": "crossfix",
@@ -72,6 +72,11 @@ Inspect _run_tests_once when extending supported test styles.[^solver]
 A test file that needs pytest (imports it, takes fixture or parametrize arguments, or
 has a conftest.py beside it or at the task root) runs under the image's pytest from the
 task root; success needs a passed test, and failing names come from its FAILED lines.
+A model patch the tests could not judge at all (no runnable tests, or an import of a package
+neither installed nor in the task) is kept and answered DONE; with red tests it is not. The
+likely target source comes first in the coding prompt. A CSV column's nan/inf values give no
+range, and announced columns that are all missing from the header (no header row, another
+separator) are a soft note, not a free verdict.
 Tests run with the task root (and src/) on PYTHONPATH, so tests/ files import the module at
 the root; a run that exits 0 but prints "FAILED (" or "FAIL:"/"ERROR:" lines (unittest.main(exit=False))
 is a failure; a required numeric value does not fix its type (assertIsInstance(f(x), float) with

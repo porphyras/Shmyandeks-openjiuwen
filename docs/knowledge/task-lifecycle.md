@@ -21,12 +21,12 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "106bc08f393b2e02d309c5169e1fabc909b3db0ab77869c8f347c5067e3f0179"
+      "sha256": "08abe487e6b6791d60a95719013431978fdfdd153399fc5fc509b3bba948f0bf"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "2368498c1181d3397ed332352ffe759de6876b3eedc0bd6c0422f1e9f202c247"
+      "sha256": "fd1a98f43ed1aa0a3562e736b8f547140ad88c25d4febf3422ec98c01c31bf04"
     },
     {
       "id": "flow",
@@ -48,6 +48,9 @@ instruction, task_type, task_id and reward; workspace/ may hold input files.
 Task.cwd selects the workspace when usable. Task.instruction retains the
 original text; short_instruction removes known boilerplate and caps long text.[^context]
 
+load_tasks also looks one or two levels deeper when the mounted folder has no task.json
+(an unpacked archive), and archive/OS litter (.DS_Store, ._x, __MACOSX, .git) is never
+part of a task's files; a crossfix index that fails to build is replaced by an empty one.
 Run.run loads the batch, inspects tasks, attempts free solutions and queues model
 work by expected reward per cost. The Python process sees the batch; each solver
 constructs messages for an individual task. There is no shared batch-wide model

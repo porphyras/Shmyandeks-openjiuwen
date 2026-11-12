@@ -221,6 +221,20 @@ def _uses_pytest(src, test_dir, root=None):
     return False
 
 
+def _tests_unverifiable(out, cwd):
+    """The test log shows no verdict on the code: no failing test, and either nothing runnable
+    or an import of a package that is neither installed nor part of the task."""
+    if ctx.failing_test_names(out):
+        return False
+    if re.search(r"No runnable tests (executed|discovered)", out):
+        return True
+    for m in re.finditer(r"(?:ModuleNotFoundError|ImportError): No module named '([\w.]+)'", out):
+        root = m.group(1).split(".")[0]
+        if not ctx._module_in_tree(cwd, root):
+            return True
+    return False
+
+
 def _has_plain_tests(src):
     """A test file with pytest-style tests (a top-level test function or a Test* class without a
     TestCase base): a script run with unittest.main() would skip them."""
@@ -619,7 +633,9 @@ class Solver:
         # ...; hidden tests will check it"): such a task goes to the model.
         info["initial_pass"] = ok and not _NEW_CODE.search(task.instruction or "")
         info["test_out"] = out
-        info["ctx"] = self._coding_context(task, srcs, tests, out)
+        # the likely target first: with 4+ sources the context shows only the first three
+        first = srcs[0] if len(srcs) == 1 else self._guess_target(srcs, tests)
+        info["ctx"] = self._coding_context(task, [first] + [p for p in srcs if p != first], tests, out)
 
     def _coding_context(self, task, srcs, tests, out):
         parts = []
@@ -987,7 +1003,7 @@ class Solver:
         instr = task.short_instruction()
         out = info.get("test_out", "")
         for attempt in range(2):  # the reasoning rung also gets a second look with the new test log
-            body = (instr + "\n" + self._coding_context(task, srcs, tests, out) +
+            body = (instr + "\n" + self._coding_context(task, files + [p for p in srcs if p not in files], tests, out) +
                     "\nReply in one ```python block with only the functions you changed (complete definitions). "
                     "Fix the real bug generally; do not special-case test inputs.")
             msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body}]
@@ -1028,14 +1044,22 @@ class Solver:
                 info["final_src"] = [(p, current[p]) for p in files if current[p] != original[p]]
                 return Outcome("solved", "DONE")
         # Leave the best-known version in place: keep the patch only if it fails fewer tests.
+        kept = False
         if current != original:
             n_now = len(ctx.failing_test_names(out))
             n_orig = len(ctx.failing_test_names(info.get("test_out", "")))
             if n_now > n_orig:
                 for p in files:
                     _write(p, original[p])
-        # No DONE without passing tests: with failing visible tests the hidden ones fail too,
-        # and contradictory tests must stay recognisably unsolved.
+            else:
+                kept = True
+        if kept and _tests_unverifiable(out, task.cwd):
+            # The tests could not run here at all (a package this image lacks, a plain script with
+            # no runnable tests): the kept patch is answered - a wrong DONE costs nothing.
+            info["final_src"] = [(p, current[p]) for p in files if current[p] != original[p]]
+            return Outcome("failed", "DONE", note="patch kept; the tests could not be run here")
+        # No DONE when the tests ran and failed: the hidden ones fail too, and contradictory
+        # tests must stay recognisably unsolved.
         return Outcome("failed", note="tests still failing")
 
     def protect(self, info):

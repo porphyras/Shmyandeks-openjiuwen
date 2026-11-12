@@ -41,7 +41,7 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "106bc08f393b2e02d309c5169e1fabc909b3db0ab77869c8f347c5067e3f0179"
+      "sha256": "08abe487e6b6791d60a95719013431978fdfdd153399fc5fc509b3bba948f0bf"
     },
     {
       "id": "deps",

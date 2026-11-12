@@ -64,7 +64,9 @@ class Task:
         return re.sub(r"\s+", " ", s).strip()
 
 
-def load_tasks(root):
+def load_tasks(root, _depth=0):
+    """Task folders (with task.json) under root; when there are none, one or two levels deeper
+    (an unpacked archive: tasks/task-dir/..., next to a __MACOSX folder)."""
     tasks = []
     try:
         names = sorted(os.listdir(root))
@@ -87,7 +89,17 @@ def load_tasks(root):
             continue
         if t.instruction:
             tasks.append(t)
+    if not tasks and _depth < 2:
+        for name in names:
+            d = os.path.join(root, name)
+            if os.path.isdir(d) and not os.path.islink(d) and not _junk_name(name):
+                tasks += load_tasks(d, _depth + 1)
     return tasks
+
+
+def _junk_name(name):
+    """Archive and OS litter, never part of a task: .DS_Store, ._x (AppleDouble), __MACOSX, .git."""
+    return name.startswith(".") or name == "__MACOSX"
 
 
 def read_text(path, limit=MAX_FILE_READ):
@@ -108,9 +120,9 @@ def list_files(root, limit=10000):
     except OSError:
         return out
     for dp, dn, fn in os.walk(root):
-        dn[:] = sorted(x for x in dn if x not in ("__pycache__", ".git") and not os.path.islink(os.path.join(dp, x)))
+        dn[:] = sorted(x for x in dn if x != "__pycache__" and not _junk_name(x) and not os.path.islink(os.path.join(dp, x)))
         for f in sorted(fn):
-            if f == "answer.txt" or f.startswith(".answer.txt"):
+            if f == "answer.txt" or _junk_name(f):
                 continue
             p = os.path.join(dp, f)
             try:
@@ -234,8 +246,9 @@ def csv_brief(path, head_rows=3, max_distinct=15, max_bytes=16 << 20, name=None)
                     if numeric[i]:
                         try:
                             x = float(v)
-                            lo[i] = x if lo[i] is None else min(lo[i], x)
-                            hi[i] = x if hi[i] is None else max(hi[i], x)
+                            if x == x and abs(x) != float("inf"):  # nan/inf: no range, no crash
+                                lo[i] = x if lo[i] is None else min(lo[i], x)
+                                hi[i] = x if hi[i] is None else max(hi[i], x)
                         except ValueError:
                             numeric[i] = False
                     if len(distinct[i]) <= 200:
@@ -349,7 +362,7 @@ def data_context(task):
             question = instr[m.end():].lower()
             used = [c for c in missing if re.search(r"\b%s\b" % re.escape(c.lower().replace("_", " ")),
                                                      question.replace("_", " "))]
-            if used:
+            if used and len(missing) < len(announced):  # all missing: the header was not read
                 problems.append("columns missing in file: %s" % ",".join(used))
             elif missing:
                 soft.append("announced columns missing in file: %s" % ",".join(missing))
@@ -673,9 +686,10 @@ def kb_fallback_text(task, small=20000, limit=12000, hint="", own_articles=0):
 def kb_bytes(task, max_files=3000):
     """Bytes of the task's files (the knowledge base of a search task); bounded walk."""
     total, n = 0, 0
-    for dp, _, fs in os.walk(task.cwd):
+    for dp, dn, fs in os.walk(task.cwd):
+        dn[:] = [x for x in dn if not _junk_name(x)]
         for f in fs:
-            if f == "answer.txt":
+            if f == "answer.txt" or _junk_name(f):
                 continue
             n += 1
             if n > max_files:

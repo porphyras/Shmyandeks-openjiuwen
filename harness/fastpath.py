@@ -732,12 +732,13 @@ def _inverse_base(task):
     paths, directories = [], 0
     try:
         for root, dirs, files in os.walk(task.cwd, onerror=unreadable):
+            dirs[:] = [d for d in dirs if not ctx._junk_name(d)]  # __MACOSX, .git: archive litter
             directories += 1
             if directories > 1000 or any(os.path.islink(os.path.join(root, d)) for d in dirs):
                 return None
             for filename in sorted(files):
-                if filename == "answer.txt" or filename.startswith(".answer.txt"):
-                    continue  # harness output is not a KB document
+                if filename == "answer.txt" or ctx._junk_name(filename):
+                    continue  # harness output and OS litter (.DS_Store) are not KB documents
                 path = os.path.join(root, filename)
                 if os.path.islink(path) or not os.path.isfile(path):
                     return None

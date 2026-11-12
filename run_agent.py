@@ -372,8 +372,12 @@ class Run:
         self.infos = infos
         # Functions that passed their tests in one code task, to repair the same functions
         # broken in another task without the model (harness/crossfix.py).
-        xfix = crossfix.build_index([(t, infos.get(t.name)) for t in tasks]) \
-            if os.environ.get("HARNESS_CROSSFIX", "1") == "1" else {}
+        try:  # an index that cannot be built must not end the run before any task
+            xfix = crossfix.build_index([(t, infos.get(t.name)) for t in tasks]) \
+                if os.environ.get("HARNESS_CROSSFIX", "1") == "1" else {}
+        except Exception as e:
+            xfix = {}
+            trace({"ev": "crossfix_error", "err": type(e).__name__})
         heap, seq = [], itertools.count()
         for t in tasks:
             info = infos.get(t.name)
