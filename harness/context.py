@@ -297,6 +297,7 @@ def excel_brief(path, rel, max_sheets=5, rows=3):
     out = ["%s (Excel workbook, sheets: %s)" % (rel, ", ".join(repr(n) for n in wb.sheetnames))]
     try:
         for name in wb.sheetnames[:max_sheets]:
+          try:
             ws = wb[name]
             top = [list(r) for r in ws.iter_rows(min_row=1, max_row=10 + rows, values_only=True)]
             width = max((len([c for c in r if c not in (None, "")]) for r in top), default=0)
@@ -311,6 +312,8 @@ def excel_brief(path, rel, max_sheets=5, rows=3):
                 top = [list(r) for r in ws.iter_rows(min_row=1, max_row=k + 11, values_only=True)]
                 n_rows = 10  # a note sheet: its lines are the content
             data = [", ".join("" if c is None else str(c) for c in r[:len(header) or None]) for r in top[k + 1:k + 1 + n_rows]]
+            while len(data) > rows and sum(map(len, data)) > 400:
+                data.pop()  # long notes must not push the data sheets out of the brief
             if FIX_XLSX and ws.max_row and ws.max_row > k + 1 + n_rows:
                 last = [list(r) for r in ws.iter_rows(min_row=ws.max_row, max_row=ws.max_row, values_only=True)]
                 if last and any(isinstance(c, str) and re.fullmatch(r"\s*(grand\s+)?(totals?|sum|итого)\s*:?\s*", c, re.I)
@@ -320,6 +323,8 @@ def excel_brief(path, rel, max_sheets=5, rows=3):
                        "pd.read_excel(%r, sheet_name=%r, header=%d)" % (
                            name, ws.max_row, ws.max_column, k + 1, ", ".join(header), rel, name, k))
             out += ["  " + d for d in data if d.strip(", ")]
+          except Exception as e:  # a chart sheet, an odd cell: this sheet only
+            out.append("sheet %r: not readable here (%s)" % (name, type(e).__name__))
     finally:
         wb.close()
     return "\n".join(out)[:1500]
@@ -399,9 +404,10 @@ _STOP = set("the a an in of which what who whom whose is was were did does do fo
             "write final answer how many".split())
 
 
-FIX_NFKD = os.environ.get("HARNESS_FIX_NFKD", "0") == "1"    # Jürgen = Jurgen in retrieval
-FIX_CARDS = os.environ.get("HARNESS_FIX_CARDS", "0") == "1"  # "- **Key:** value" cards, front-matter titles
-FIX_XLSX = os.environ.get("HARNESS_FIX_XLSX", "0") == "1"    # small sheets whole, a trailing total row shown
+# On by default (the organisers' command sets no flags); =0 turns one off.
+FIX_NFKD = os.environ.get("HARNESS_FIX_NFKD", "1") == "1"    # Jürgen = Jurgen in retrieval
+FIX_CARDS = os.environ.get("HARNESS_FIX_CARDS", "1") == "1"  # "- **Key:** value" cards, front-matter titles
+FIX_XLSX = os.environ.get("HARNESS_FIX_XLSX", "1") == "1"    # note sheets shown, a trailing total row shown
 
 
 def _fold(s):
@@ -426,15 +432,23 @@ def kb_docs(task):
 
 
 def _title(rel, text):
-    if FIX_CARDS:
-        fm = re.match(r"\s*---\s*\n(.*?)\n---\s*(\n|$)", text, re.S)
+    fm_title = None
+    if FIX_CARDS:  # front matter: name: first, then a "# heading", then title:, then the file name
+        fm = re.match(r"\s*---[ \t]*\n(.*?)\n---[ \t]*(\n|$)", text, re.S)
         if fm:
-            m = re.search(r"^(?:name|title)\s*:\s*[\"']?(.+?)[\"']?\s*$", fm.group(1), re.M | re.I)
-            if m:
-                return m.group(1).strip()
+            vals = {}
+            for k in ("name", "title"):
+                m = re.search(r"^%s[ \t]*:[ \t]*[\"']?([^\n]*?)[\"']?[ \t]*$" % k, fm.group(1), re.M | re.I)
+                if m and m.group(1).strip() and m.group(1).strip() not in (">", "|", ">-", "|-"):
+                    vals[k] = m.group(1).strip()
+            if "name" in vals:
+                return vals["name"]
+            fm_title = vals.get("title")
     m = re.search(r"^#\s*(.+)$", text, re.M)
     if m:
         return m.group(1).strip()
+    if fm_title:
+        return fm_title
     base = os.path.splitext(os.path.basename(rel))[0]
     base = re.sub(r"^(person|company|org|city)_", "", base)
     return base.replace("_", " ")
@@ -461,8 +475,9 @@ def kb_structured(docs):
             if not line or line.startswith("#"):
                 continue
             total += 1
-            if FIX_CARDS:  # "- **Born:** 1980" is a card line too
-                line = re.sub(r"^[-*+]\s+", "", line).replace("**", "").replace("__", "")
+            if FIX_CARDS:  # "- **Born:** 1980" is a card line too; bold prose ("**Q: ...?**") is not
+                line = re.sub(r"^[-*+]\s+", "", line)
+                line = re.sub(r"^(\*\*|__)([A-Za-z][\w ]{0,30})(?::\1|\1:)(?=\s)", r"\2:", line)
             kv += bool(re.match(r"^[A-Za-z][\w ]{0,30}:\s+\S", line))
     return total > 0 and kv >= 0.5 * total
 

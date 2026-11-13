@@ -131,34 +131,7 @@ except Exception:
 print(_r.item() if hasattr(_r, 'item') else _r)"""
 
 
-FIX_CUT = os.environ.get("HARNESS_FIX_CUT", "0") == "1"    # a program cut at max_tokens gets one retry
-FIX_XLSX = os.environ.get("HARNESS_FIX_XLSX", "0") == "1"  # pd.read_excel drops a trailing total row
-# Prepended to a program when the data is an Excel workbook: a last row labelled Total/Итого whose
-# numbers are the sums of the rows above is not data (as _clean does for CSV).
-_XLSX_TOTALS = """import pandas as _pdx, re as _rex
-_read_excel = _pdx.read_excel
-def _drop_total(d):
-    if not isinstance(d, _pdx.DataFrame) or len(d) <= 2:
-        return d
-    last = d.iloc[-1]
-    if any(isinstance(v, str) and _rex.fullmatch(r"\\s*(grand\\s+)?(totals?|sum)\\s*:?\\s*|\\s*итого\\s*:?\\s*", v, _rex.I)
-           for v in last.values):
-        body = d.iloc[:-1]
-        for c in d.columns:
-            try:
-                if _pdx.api.types.is_numeric_dtype(d[c]) and _pdx.notna(last[c]) and \\
-                        abs(float(body[c].sum()) - float(last[c])) <= 1e-6 * max(1.0, abs(float(last[c]))):
-                    return body.copy()
-            except Exception:
-                pass
-    return d
-def _read_excel_clean(*a, **k):
-    r = _read_excel(*a, **k)
-    return {n: _drop_total(v) for n, v in r.items()} if isinstance(r, dict) else _drop_total(r)
-_pdx.read_excel = _read_excel_clean
-"""
-
-
+FIX_CUT = os.environ.get("HARNESS_FIX_CUT", "1") == "1"  # a program cut at max_tokens gets one retry (0: off)
 # Used when running a test file as a script did not execute unittest.main(), or when the file
 # also holds pytest-style tests the script run skips. Loading the suite also runs TestCase
 # classes that have no __main__ entry point; plain test functions and plain Test* classes (no
@@ -768,15 +741,14 @@ class Solver:
         key_retried = False  # a KeyError on a name from the question gets one retry with the columns
         tries = 1 if level >= 2 else 2
         cut_mt = None
-        xlsx = FIX_XLSX and data and not tables and any(p.lower().endswith((".xlsx", ".xlsm"))
-                                                       for p in ctx.list_files(task.cwd, 50))
         for attempt in range(tries):  # the reasoning rung gets one call
             if attempt:
                 msgs = msgs[:2] + [{"role": "assistant", "content": "```python\n%s\n```" % (model_code or code)},
                                    {"role": "user", "content": last_err + " Reply with the fixed program only."}]
             task._last_finish = None
             reply = self.ask(task, msgs, level + attempt, cut_mt or (600 if data else 400), temperature=0.5 if attempt else 0.0)
-            if FIX_CUT and getattr(task, "_last_finish", None) == "length" and attempt + 1 < tries and not cut_mt:
+            if FIX_CUT and getattr(task, "_last_finish", None) == "length" and attempt + 1 < tries and not cut_mt \
+                    and not CODE_RE.search(reply or ""):  # a closed code block is a whole program
                 # Cut at the token limit: an IMPOSSIBLE branch or an empty output of a half program
                 # says nothing. One retry, told why.
                 cut_mt = 800
@@ -814,9 +786,6 @@ class Solver:
                 code = prelude + (code if "print(" in code else _wrap_last_expr(code) + _PRINT_SCALAR)
             elif not data:
                 code = _tolerant_ints(code)
-            elif xlsx:
-                code = _XLSX_TOTALS + code
-                task._fixes = getattr(task, "_fixes", set()) | {"xlsx"}
             ans_path = os.path.join(task.cwd, "answer.txt")
             before = _mtime(ans_path)
             rc, out, err = sandbox.run_python_code(code, task.cwd, timeout=30)
