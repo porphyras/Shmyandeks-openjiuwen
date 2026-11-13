@@ -306,7 +306,16 @@ def excel_brief(path, rel, max_sheets=5, rows=3):
             header = [str(c) if c is not None else "" for c in (top[k] if top else [])]
             while header and header[-1] == "":
                 header.pop()
-            data = [", ".join("" if c is None else str(c) for c in r[:len(header) or None]) for r in top[k + 1:k + 1 + rows]]
+            n_rows = rows
+            if FIX_XLSX and len(header) <= 2:
+                top = [list(r) for r in ws.iter_rows(min_row=1, max_row=k + 11, values_only=True)]
+                n_rows = 10  # a note sheet: its lines are the content
+            data = [", ".join("" if c is None else str(c) for c in r[:len(header) or None]) for r in top[k + 1:k + 1 + n_rows]]
+            if FIX_XLSX and ws.max_row and ws.max_row > k + 1 + n_rows:
+                last = [list(r) for r in ws.iter_rows(min_row=ws.max_row, max_row=ws.max_row, values_only=True)]
+                if last and any(isinstance(c, str) and re.fullmatch(r"\s*(grand\s+)?(totals?|sum|итого)\s*:?\s*", c, re.I)
+                                for c in last[0]):
+                    data.append("... last row %d: %s" % (ws.max_row, ", ".join("" if c is None else str(c) for c in last[0][:len(header) or None])))
             out.append("sheet %r: about %s rows x %s columns; header at row %d: %s; load with "
                        "pd.read_excel(%r, sheet_name=%r, header=%d)" % (
                            name, ws.max_row, ws.max_column, k + 1, ", ".join(header), rel, name, k))
@@ -390,7 +399,20 @@ _STOP = set("the a an in of which what who whom whose is was were did does do fo
             "write final answer how many".split())
 
 
+FIX_NFKD = os.environ.get("HARNESS_FIX_NFKD", "0") == "1"    # Jürgen = Jurgen in retrieval
+FIX_CARDS = os.environ.get("HARNESS_FIX_CARDS", "0") == "1"  # "- **Key:** value" cards, front-matter titles
+FIX_XLSX = os.environ.get("HARNESS_FIX_XLSX", "0") == "1"    # small sheets whole, a trailing total row shown
+
+
+def _fold(s):
+    import unicodedata
+    s = s.replace("ß", "ss").replace("ẞ", "ss")
+    return "".join(ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch))
+
+
 def _norm(s):
+    if FIX_NFKD:
+        s = _fold(s)
     return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
 
@@ -404,6 +426,12 @@ def kb_docs(task):
 
 
 def _title(rel, text):
+    if FIX_CARDS:
+        fm = re.match(r"\s*---\s*\n(.*?)\n---\s*(\n|$)", text, re.S)
+        if fm:
+            m = re.search(r"^(?:name|title)\s*:\s*[\"']?(.+?)[\"']?\s*$", fm.group(1), re.M | re.I)
+            if m:
+                return m.group(1).strip()
     m = re.search(r"^#\s*(.+)$", text, re.M)
     if m:
         return m.group(1).strip()
@@ -433,6 +461,8 @@ def kb_structured(docs):
             if not line or line.startswith("#"):
                 continue
             total += 1
+            if FIX_CARDS:  # "- **Born:** 1980" is a card line too
+                line = re.sub(r"^[-*+]\s+", "", line).replace("**", "").replace("__", "")
             kv += bool(re.match(r"^[A-Za-z][\w ]{0,30}:\s+\S", line))
     return total > 0 and kv >= 0.5 * total
 

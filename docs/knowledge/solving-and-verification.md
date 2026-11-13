@@ -22,12 +22,12 @@
     {
       "id": "solver",
       "resource": "../../harness/solver.py",
-      "sha256": "cf071df1e333ca985423abc663951c94c10784b7b6a74929b5fc4cab20f11bcf"
+      "sha256": "2c9990f17537f1f894870041e1963a234a54f840313ffc5d935bcc4842e1ceba"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "fd1a98f43ed1aa0a3562e736b8f547140ad88c25d4febf3422ec98c01c31bf04"
+      "sha256": "36cb5107cad14efe6b3337951a1ed93de9ed3cbb1c3491a46b9eb933e785f2af"
     },
     {
       "id": "fast",
@@ -72,6 +72,11 @@ Inspect _run_tests_once when extending supported test styles.[^solver]
 A test file that needs pytest (imports it, takes fixture or parametrize arguments, or
 has a conftest.py beside it or at the task root) runs under the image's pytest from the
 task root; success needs a passed test, and failing names come from its FAILED lines.
+Experiment flags, off by default: HARNESS_FIX_CUT (a math/data program cut at max_tokens is
+retried once, told it was cut, instead of trusting its IMPOSSIBLE or empty output),
+HARNESS_FIX_NFKD (retrieval folds accents), HARNESS_FIX_XLSX (pd.read_excel drops a trailing
+total row; small note sheets shown whole), HARNESS_FIX_CARDS ("- **Key:** value" cards,
+front-matter titles).
 A model patch the tests could not judge at all (no runnable tests, or an import of a package
 neither installed nor in the task) is kept and answered DONE; with red tests it is not. The
 likely target source comes first in the coding prompt. A CSV column's nan/inf values give no

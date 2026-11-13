@@ -180,6 +180,10 @@ class Run:
                 raise SkipTask()  # a known budget would be overrun by this call: leave this task
         text, cost, finish = self.llm.chat(model, messages, max_tokens, temperature=temperature,
                                            timeout=150.0 if reasoning else 60.0, tag=task.name)
+        try:
+            task._last_finish = finish  # the program solver retries a reply cut at max_tokens
+        except AttributeError:
+            pass
         with self.lock:
             self.cost[task.name] = self.cost.get(task.name, 0.0) + cost
         trace({"ev": "reply", "task": task.name, "level": level, "model": model, "finish": finish,
@@ -284,6 +288,7 @@ class Run:
             est["status"] = outcome.status
             self.summary.record_estimates(self.estimates)
         trace({"ev": "task", "task": task.name, "kind": task.kind, "status": outcome.status, "answer": ans,
+               "fixes": sorted(getattr(task, "_fixes", ())),
                "note": outcome.note, "cost": round(self.cost.get(task.name, 0.0), 1),
                "spent": round(self.llm.spent, 1)})
 

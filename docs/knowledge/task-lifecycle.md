@@ -21,12 +21,12 @@
     {
       "id": "run",
       "resource": "../../run_agent.py",
-      "sha256": "08abe487e6b6791d60a95719013431978fdfdd153399fc5fc509b3bba948f0bf"
+      "sha256": "6bbd94a7d79b8809799b2ca4017f9b62657bb2ee480f08546886292b33641e87"
     },
     {
       "id": "context",
       "resource": "../../harness/context.py",
-      "sha256": "fd1a98f43ed1aa0a3562e736b8f547140ad88c25d4febf3422ec98c01c31bf04"
+      "sha256": "36cb5107cad14efe6b3337951a1ed93de9ed3cbb1c3491a46b9eb933e785f2af"
     },
     {
       "id": "flow",
