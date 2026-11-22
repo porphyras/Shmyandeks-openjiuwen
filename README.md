@@ -1,8 +1,49 @@
 # Shmyandeks — budget-aware task harness on openJiuwen
 
+An agent harness for the **openJiuwen Challenge 2026** (Tech Arena 2026 × Huawei openJiuwen,
+online round 7–13 November 2026), written by team **Шмяндекс**. The harness gets a directory
+of tasks of four kinds (math, table analysis, questions over a knowledge base, fixing code
+against tests), each with a random reward, and a token budget of about 100k units
+(input tokens / 10 + output tokens, reasoning included). The score is the sum of rewards for
+correct answers. A wrong answer costs only its tokens, and ties are broken by tokens spent.
+There may be more tasks than the budget allows, so the harness decides which tasks to solve,
+in which order and how cheaply.
+
+**Result:** the solution passed the organisers' checks and scored about 170–180 points in the
+final run. It did not place in the top three.
+
+**Highlights**
+
+- **Built on openJiuwen.** Every task is an openJiuwen `Workflow` (inspect → solve → finish).
+  Every model call goes through `Model.invoke`, and the budget ledger and the retry policy are
+  openJiuwen rails around that call.
+- **Reward per token.** Before any model call, each task gets a cost forecast from what a free
+  inspection measured. Tasks are taken greedily by `reward × p(success) / cost`, and each answer
+  is written to disk the moment it is ready.
+- **Free answers only when certain.** Plain code answers a task only when every sentence of the
+  statement parses into a known form and the data checks out: 1,224 answers on the bench with
+  zero errors. Infeasible tasks are declared for free only on signals that cannot fire on a
+  solvable task (zero false verdicts on pairs of a solvable task and its unsolvable twin).
+- **Measured on tasks it never saw.** Blind hold-out sets, red-team batches written away from
+  the examples' templates (140 of 140), stress batches with tables up to 200k rows and modules
+  up to 1,500 lines, and public sets (GSM-Hard, MBPP, MuSiQue, DABench).
+- **Safe to run.** A read-only container without capabilities, nothing downloaded at run time,
+  and programs written by the model run without the proxy key in their environment.
+
+| Path | What is there |
+|---|---|
+| `run_agent.py` | Entry point |
+| `harness/` | The harness: inspection, fast path, solvers, budget planning, openJiuwen workflow and rails |
+| `bench/` | Local replica of the judge (a stub proxy that counts tokens the organisers' way, a Docker run with the judge's flags), task generators and graders |
+| `tests/` | Offline regression, metamorphic and stress tests, run in CI |
+| `docs/` | Design decisions, audits and the knowledge catalog for contributors |
+| `models/` | A small CPU sentence-embedding model (bge-small-en-v1.5, int8 ONNX, MIT) |
+
 Developing this repository? Start with [AGENTS.md](AGENTS.md) and the
 [knowledge catalog](docs/knowledge/index.md) for contracts, source ownership and
 verification commands. Search locally with `python3 tools/knowledge.py search QUERY`.
+
+## How it works in short
 
 The harness gets a directory of tasks, sees every task and its reward at once, and spends a
 fixed token budget on the tasks that promise the most reward per token. Plain code answers only
@@ -566,3 +607,8 @@ scanners; the hashes are in `models/bge-small-en-v1.5-int8/README.md`.
 - `OUT` is no longer part of the contract; it is still honoured when given.
 - Code tasks are checked with a rewritten, extended test file, so fixes must be general: the
   prompt asks the model to fix the real bug and not to special-case test inputs.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The embedding model in `models/bge-small-en-v1.5-int8/` keeps
+its own MIT license from BAAI.
